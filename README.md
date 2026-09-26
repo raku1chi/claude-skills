@@ -37,7 +37,6 @@ claude plugin install security-posture-check@raku1chi-skills
 自分で追加したマーケットプレイスは、既定では自動更新されない。`/plugin` の **Marketplaces** タブで `raku1chi-skills` を選び、**Enable auto-update** を選ぶと自動で更新される。手動で更新するときは次を実行する。
 
 ```bash
-claude plugin marketplace update raku1chi-skills
 claude plugin update security-posture-check@raku1chi-skills
 ```
 
