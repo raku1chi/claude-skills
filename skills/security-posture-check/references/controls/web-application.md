@@ -64,7 +64,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: High
 - **リスク**: 公開ドキュメントやソースに書かれた既定の資格情報で管理者としてログインされる
 - **対応方針**: 既定アカウントを削除し、初期管理者は環境ごとに生成したランダムな資格情報か招待フローで作成
-- **根拠**: ASVS v5.0.0-6.3.2 (L1), 13.2.3 (L2) / CWE-1392（https://cwe.mitre.org/data/definitions/1392.html ）→ A07:2025
+- **根拠**: ASVS v5.0.0-6.3.2 (L1: 既定のユーザーアカウント), 13.2.3 (L2: サービス間の既定の資格情報) / CWE-1392（https://cwe.mitre.org/data/definitions/1392.html ）→ A07:2025
 
 ### AUTH-05 多要素認証（MFA）を利用できる
 - **適用**: アプリ自身が認証を実装し、管理者や重要データを扱う（外部 IdP 利用なら IdP 側設定として要確認）
@@ -73,7 +73,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: Medium（管理画面がある場合）/ Low（一般ユーザー向けのみ）
 - **リスク**: パスワードが漏れた時点でアカウントが乗っ取られる
 - **対応方針**: 管理者から MFA を必須化。認証をマネージド IdP に委ねるのも有効
-- **根拠**: ASVS v5.0.0-6.3.3 (L2), 6.4.3 (L2)
+- **根拠**: ASVS v5.0.0-6.3.3 (L2: 多要素認証), 6.4.3 (L2: パスワードリセットで MFA を迂回させない)
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html
 
 ### AUTH-06 外部 IdP・OAuth/OIDC 連携が安全に実装されている
@@ -82,7 +82,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 実績あるライブラリで標準的に実装 / 🟡 一部の検証が欠ける / ❌ 署名・state を検証していない、Implicit フロー
 - **重大度**: High
 - **リスク**: 他人のアカウントへのログイン（アカウント乗っ取り）、ログイン CSRF
-- **根拠**: ASVS v5.0.0-10.1.2 (L2), 10.2.1 (L2), 10.5.1 (L2), 10.5.2 (L2), 6.8.2 (L2)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x19-V10-OAuth-and-OIDC.md ）
+- **根拠**: ASVS v5.0.0-10.1.2 (L2: フローを開始した利用者との対応付け), 10.2.1 (L2: コードフローの CSRF 対策（PKCE・state）), 10.5.1 (L2: ID トークンの再利用対策（nonce）), 10.5.2 (L2: 利用者の識別に sub を使う), 6.8.2 (L2: 認証アサーションの署名検証)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x19-V10-OAuth-and-OIDC.md ）
 
 ---
 
@@ -96,7 +96,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: Medium
 - **リスク**: HTTP 通信での盗聴や XSS でセッション Cookie を盗まれ、なりすまされる
 - **対応方針**: `Secure`・`HttpOnly`・`SameSite=Lax` 以上。可能なら `__Host-` プレフィックス
-- **根拠**: ASVS v5.0.0-3.3.1 (L1), 3.3.2 (L2), 3.3.4 (L2)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x12-V3-Web-Frontend-Security.md ）/ CWE-614（https://cwe.mitre.org/data/definitions/614.html ）, CWE-1004 → A02:2025（https://owasp.org/Top10/2025/A02_2025-Security_Misconfiguration/ ）/ IPA 1.4 セッション管理の不備
+- **根拠**: ASVS v5.0.0-3.3.1 (L1: Secure 属性), 3.3.2 (L2: SameSite 属性), 3.3.4 (L2: HttpOnly 属性)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x12-V3-Web-Frontend-Security.md ）/ CWE-614（https://cwe.mitre.org/data/definitions/614.html ）, CWE-1004 → A02:2025（https://owasp.org/Top10/2025/A02_2025-Security_Misconfiguration/ ）/ IPA 1.4 セッション管理の不備
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 
 ### SESS-02 ログイン時にセッションを再生成し、ログアウト・期限切れで確実に無効化する
@@ -105,7 +105,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 再生成・サーバー側失効・タイムアウトあり / 🟡 一部欠落（例: Cookie セッションでログアウト後も再利用可能）/ ❌ いずれもない
 - **重大度**: Medium
 - **リスク**: セッション固定攻撃、盗まれたセッションがログアウト後も使い続けられる
-- **根拠**: ASVS v5.0.0-7.2.4 (L1), 7.4.1 (L1), 7.3.1 (L2)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x16-V7-Session-Management.md ）/ CWE-384（https://cwe.mitre.org/data/definitions/384.html ）, CWE-613 → A07:2025
+- **根拠**: ASVS v5.0.0-7.2.4 (L1: ログイン時のセッション再生成), 7.4.1 (L1: ログアウト・期限切れでの無効化), 7.3.1 (L2: 無操作タイムアウト)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x16-V7-Session-Management.md ）/ CWE-384（https://cwe.mitre.org/data/definitions/384.html ）, CWE-613 → A07:2025
 
 ### SESS-03 トークン（JWT 等）が正しく検証されている
 - **適用**: JWT などの自己完結型トークンを発行・検証する
@@ -114,7 +114,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: Critical（署名未検証）/ Medium（期限なし）
 - **リスク**: トークンを改ざん・偽造して他人や管理者になりすませる。期限のないトークンは漏えい後も永久に使える
 - **対応方針**: `verify` 系 API で署名検証、`algorithms` を固定、短い `expiresIn` とリフレッシュトークン運用
-- **根拠**: ASVS v5.0.0-9.1.1 (L1), 9.1.2 (L1), 9.2.1 (L1)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x18-V9-Self-contained-Tokens.md ）/ CWE-347（https://cwe.mitre.org/data/definitions/347.html ）→ A04:2025 / CWE-613 → A07:2025
+- **根拠**: ASVS v5.0.0-9.1.1 (L1: 署名・MAC の検証), 9.1.2 (L1: アルゴリズムの許可リスト（none 不可）), 9.2.1 (L1: exp・nbf の検証)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x18-V9-Self-contained-Tokens.md ）/ CWE-347（https://cwe.mitre.org/data/definitions/347.html ）→ A04:2025 / CWE-613 → A07:2025
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html
 
 ---
@@ -129,7 +129,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: High（管理機能なら Critical）
 - **リスク**: 一般ユーザー（または未認証者）が管理機能を直接呼び出して実行できる
 - **対応方針**: 権限チェックを共通のミドルウェア・ポリシー層に集約し、既定拒否にする
-- **根拠**: ASVS v5.0.0-8.2.1 (L1), 8.3.1 (L1)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x17-V8-Authorization.md ）/ CWE-862（https://cwe.mitre.org/data/definitions/862.html ）→ A01:2025（https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/ ）/ OWASP API5:2023（https://owasp.org/API-Security/editions/2023/en/0xa5-broken-function-level-authorization/ ）/ IPA 1.11
+- **根拠**: ASVS v5.0.0-8.2.1 (L1: 機能単位の権限), 8.3.1 (L1: 信頼できる層での強制)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x17-V8-Authorization.md ）/ CWE-862（https://cwe.mitre.org/data/definitions/862.html ）→ A01:2025（https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/ ）/ OWASP API5:2023（https://owasp.org/API-Security/editions/2023/en/0xa5-broken-function-level-authorization/ ）/ IPA 1.11
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
 
 ### AUTHZ-02 オブジェクト単位の認可がある（IDOR / BOLA 対策）
@@ -149,7 +149,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: High（`role` や `is_admin` を書き換えられる場合）/ Medium
 - **リスク**: 利用者が `role: "admin"` や価格・所有者などを勝手に書き換えられる。不要な項目がレスポンスから漏れる
 - **対応方針**: 更新可能な項目を明示した許可リストで受け取り、レスポンスも出力用スキーマで絞る
-- **根拠**: ASVS v5.0.0-8.2.3 (L2), 15.3.3 (L2) / CWE-915（https://cwe.mitre.org/data/definitions/915.html ）→ A08:2025（https://owasp.org/Top10/2025/A08_2025-Software_or_Data_Integrity_Failures/ ）/ OWASP API3:2023（https://owasp.org/API-Security/editions/2023/en/0xa3-broken-object-property-level-authorization/ ）
+- **根拠**: ASVS v5.0.0-8.2.3 (L2: 項目単位の認可), 15.3.3 (L2: Mass Assignment 対策) / CWE-915（https://cwe.mitre.org/data/definitions/915.html ）→ A08:2025（https://owasp.org/Top10/2025/A08_2025-Software_or_Data_Integrity_Failures/ ）/ OWASP API3:2023（https://owasp.org/API-Security/editions/2023/en/0xa3-broken-object-property-level-authorization/ ）
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html
 
 ---
@@ -184,7 +184,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: High（保存型・他ユーザーに届く）/ Medium（反射型・自分にのみ影響）
 - **リスク**: 閲覧者のブラウザで攻撃者のスクリプトが動き、セッション乗っ取り・画面の改ざん・操作の代行が起きる
 - **対応方針**: テンプレートの自動エスケープを使い、HTML を許す必要がある箇所だけ実績あるサニタイザで処理。CSP（WEB-01）を併用
-- **根拠**: ASVS v5.0.0-1.2.1 (L1), 1.3.1 (L1), 3.2.2 (L1) / CWE-79（https://cwe.mitre.org/data/definitions/79.html ）→ A05:2025 / IPA 1.5 クロスサイト・スクリプティング
+- **根拠**: ASVS v5.0.0-1.2.1 (L1: 文脈に応じた出力エンコード), 1.3.1 (L1: HTML のサニタイズ), 3.2.2 (L1: テキストとして表示（textContent 等）) / CWE-79（https://cwe.mitre.org/data/definitions/79.html ）→ A05:2025 / IPA 1.5 クロスサイト・スクリプティング
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html / https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html
 
 ### INJ-04 動的コード実行・テンプレートインジェクション・安全でないデシリアライズがない
@@ -194,7 +194,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: Critical（外部入力が届く場合）
 - **リスク**: サーバー上での任意コード実行
 - **対応方針**: `eval` を使わない設計へ。`yaml.safe_load`、JSON 等データ専用の形式、型を許可リストで制限したデシリアライズ。XML は外部エンティティを無効化
-- **根拠**: ASVS v5.0.0-1.3.2 (L1), 1.3.7 (L2), 1.5.1 (L1), 1.5.2 (L2) / CWE-94（https://cwe.mitre.org/data/definitions/94.html ）→ A05:2025 / CWE-502（https://cwe.mitre.org/data/definitions/502.html ）→ A08:2025
+- **根拠**: ASVS v5.0.0-1.3.2 (L1: eval などの動的コード実行), 1.3.7 (L2: テンプレートインジェクション), 1.5.1 (L1: XML 外部実体（XXE）), 1.5.2 (L2: 信頼できないデータのデシリアライズ) / CWE-94（https://cwe.mitre.org/data/definitions/94.html ）→ A05:2025 / CWE-502（https://cwe.mitre.org/data/definitions/502.html ）→ A08:2025
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html
 
 ### INJ-05 パストラバーサル・ファイルアップロード対策
@@ -204,7 +204,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: High
 - **リスク**: `../` で任意のファイル（設定・秘密鍵）を読まれる・上書きされる。アップロードしたスクリプトが実行される
 - **対応方針**: ファイル名はサーバー側で生成、ベースディレクトリ外を拒否（正規化して比較）、サイズ・種類を検証
-- **根拠**: ASVS v5.0.0-5.2.1 (L1), 5.2.2 (L1), 5.3.1 (L1), 5.3.2 (L1)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x14-V5-File-Handling.md ）/ CWE-22（https://cwe.mitre.org/data/definitions/22.html ）→ A01:2025 / CWE-434 → A06:2025 / IPA 1.3 ディレクトリ・トラバーサル
+- **根拠**: ASVS v5.0.0-5.2.1 (L1: ファイルサイズの上限), 5.2.2 (L1: 拡張子と内容の検証), 5.3.1 (L1: アップロードしたファイルを実行させない), 5.3.2 (L1: パスに利用者の入力をそのまま使わない)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x14-V5-File-Handling.md ）/ CWE-22（https://cwe.mitre.org/data/definitions/22.html ）→ A01:2025 / CWE-434 → A06:2025 / IPA 1.3 ディレクトリ・トラバーサル
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html
 
 ### INJ-06 SSRF 対策
@@ -213,7 +213,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 許可リストで宛先を限定 / 🟡 部分的な検証のみ / ❌ 入力の URL にそのままアクセス
 - **重大度**: High（クラウド環境ではメタデータ経由で資格情報が取られるため Critical になりうる）
 - **リスク**: 内部ネットワークやクラウドのメタデータサービスにアクセスされ、資格情報や内部データが盗まれる
-- **根拠**: ASVS v5.0.0-1.3.6 (L2), 13.2.4 (L2), 15.3.2 (L2) / CWE-918（https://cwe.mitre.org/data/definitions/918.html ）→ A01:2025 / OWASP API7:2023（https://owasp.org/API-Security/editions/2023/en/0xa7-server-side-request-forgery/ ）
+- **根拠**: ASVS v5.0.0-1.3.6 (L2: SSRF 対策の許可リスト), 13.2.4 (L2: 外向き通信の許可リスト), 15.3.2 (L2: 意図しないリダイレクトを追わない) / CWE-918（https://cwe.mitre.org/data/definitions/918.html ）→ A01:2025 / OWASP API7:2023（https://owasp.org/API-Security/editions/2023/en/0xa7-server-side-request-forgery/ ）
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
 
 ### INJ-07 入力が信頼境界で検証されている
@@ -222,7 +222,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 主要な入口でスキーマ・許可リスト検証 / 🟡 一部のみ / ❌ ほぼなし
 - **重大度**: Medium
 - **リスク**: 想定外の型・長さ・値が処理に入り、インジェクションやロジックの抜け穴につながる
-- **根拠**: ASVS v5.0.0-2.2.1 (L1), 2.2.2 (L1)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x11-V2-Validation-and-Business-Logic.md ）/ CWE-20（https://cwe.mitre.org/data/definitions/20.html ）→ A05:2025 / IPA 1.7 HTTPヘッダ・インジェクション, 1.8 メールヘッダ・インジェクション
+- **根拠**: ASVS v5.0.0-2.2.1 (L1: 許可リスト・構造による検証), 2.2.2 (L1: 信頼できる層での検証)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x11-V2-Validation-and-Business-Logic.md ）/ CWE-20（https://cwe.mitre.org/data/definitions/20.html ）→ A05:2025 / IPA 1.7 HTTPヘッダ・インジェクション, 1.8 メールヘッダ・インジェクション
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
 
 ### INJ-08 オープンリダイレクトがない
@@ -246,7 +246,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: Medium（API のみなら Low）
 - **リスク**: XSS の被害拡大（CSP がない）、HTTPS から HTTP への格下げ（HSTS がない）、クリックジャッキング（frame-ancestors がない）
 - **対応方針**: helmet / Talisman / フレームワーク設定で CSP・HSTS・`X-Content-Type-Options: nosniff`・`frame-ancestors`・Referrer-Policy を付与
-- **根拠**: ASVS v5.0.0-3.4.1 (L1), 3.4.3 (L2), 3.4.4 (L2), 3.4.5 (L2), 3.4.6 (L2) / CWE-1021（https://cwe.mitre.org/data/definitions/1021.html ）→ A06:2025（https://owasp.org/Top10/2025/A06_2025-Insecure_Design/ ）/ IPA 1.9 クリックジャッキング
+- **根拠**: ASVS v5.0.0-3.4.1 (L1: HSTS), 3.4.3 (L2: CSP), 3.4.4 (L2: nosniff), 3.4.5 (L2: Referrer-Policy), 3.4.6 (L2: frame-ancestors) / CWE-1021（https://cwe.mitre.org/data/definitions/1021.html ）→ A06:2025（https://owasp.org/Top10/2025/A06_2025-Insecure_Design/ ）/ IPA 1.9 クリックジャッキング
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html / https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html
 
 ### WEB-02 CORS が必要なオリジンに限定されている
@@ -263,7 +263,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ トークン・Origin 検証・SameSite 等で保護 / 🟡 SameSite のみ、または一部で除外（`csrf_exempt` 等）/ ❌ 保護なし
 - **重大度**: Medium（送金・権限変更など重要操作がある場合は High）
 - **リスク**: 利用者が罠サイトを開いただけで、ログイン中のアカウントで意図しない操作（設定変更・購入・投稿）が行われる
-- **根拠**: ASVS v5.0.0-3.5.1 (L1), 3.5.2 (L1), 3.5.3 (L1), 3.3.2 (L2) / CWE-352（https://cwe.mitre.org/data/definitions/352.html ）→ A01:2025 / IPA 1.6 CSRF
+- **根拠**: ASVS v5.0.0-3.5.1 (L1: 発信元の検証（トークン等）), 3.5.2 (L1: プリフライトの回避を防ぐ), 3.5.3 (L1: 重要な操作に GET 等を使わない), 3.3.2 (L2: SameSite 属性) / CWE-352（https://cwe.mitre.org/data/definitions/352.html ）→ A01:2025 / IPA 1.6 CSRF
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 
 ### WEB-04 TLS を強制し、外部接続で証明書を検証している
@@ -273,7 +273,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **重大度**: High
 - **リスク**: 経路上の攻撃者が通信を盗聴・改ざんし、送信した資格情報やデータを奪う
 - **対応方針**: 検証の無効化を削除し、社内 CA なら CA バンドルを指定する
-- **根拠**: ASVS v5.0.0-12.2.1 (L1), 12.3.2 (L2)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x21-V12-Secure-Communication.md ）/ CWE-295（https://cwe.mitre.org/data/definitions/295.html ）→ A07:2025 / CWE-319 → A04:2025
+- **根拠**: ASVS v5.0.0-12.2.1 (L1: 外部公開の HTTP を TLS のみに), 12.3.2 (L2: TLS クライアントの証明書検証)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x21-V12-Secure-Communication.md ）/ CWE-295（https://cwe.mitre.org/data/definitions/295.html ）→ A07:2025 / CWE-319 → A04:2025
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
 
 ---
@@ -287,7 +287,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ セキュリティ用途は承認済みアルゴリズムのみ / 🟡 非セキュリティ用途の MD5 等のみ（明記を推奨）/ ❌ セキュリティ用途で弱いアルゴリズム
 - **重大度**: High（パスワード・署名用途）/ Low（非セキュリティ用途）
 - **リスク**: 衝突・総当たりで改ざん検知や秘匿が破られる
-- **根拠**: ASVS v5.0.0-11.3.1 (L1), 11.4.1 (L1) / CWE-327（https://cwe.mitre.org/data/definitions/327.html ）→ A04:2025
+- **根拠**: ASVS v5.0.0-11.3.1 (L1: ECB・弱いパディングの不使用), 11.4.1 (L1: 承認されたハッシュ関数（MD5 不可）) / CWE-327（https://cwe.mitre.org/data/definitions/327.html ）→ A04:2025
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html
 
 ### CRY-02 推測されてはいけない値に暗号論的乱数を使っている
@@ -296,7 +296,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ `crypto.randomBytes` / `crypto.randomUUID` / `secrets` / `crypto/rand` 等 / ❌ 非暗号論的乱数
 - **重大度**: High（認証・パスワードリセットに使われる場合）
 - **リスク**: トークンを推測され、パスワードリセットの乗っ取りやセッションの奪取が起きる
-- **根拠**: ASVS v5.0.0-7.2.3 (L1), 11.5.1 (L2) / CWE-338（https://cwe.mitre.org/data/definitions/338.html ）→ A04:2025
+- **根拠**: ASVS v5.0.0-7.2.3 (L1: セッショントークンの乱数), 11.5.1 (L2: 推測されてはいけない値の乱数) / CWE-338（https://cwe.mitre.org/data/definitions/338.html ）→ A04:2025
 
 ---
 
@@ -309,7 +309,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 該当なし / 🟡 開発用ログのみ / ❌ 本番経路で出力
 - **重大度**: Medium（資格情報が平文でログに残る場合は High）
 - **リスク**: ログ基盤・監視 SaaS・ブラウザ履歴・Referer 経由で資格情報や個人情報が漏れる
-- **根拠**: ASVS v5.0.0-16.2.5 (L2), 14.2.1 (L1)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md ）/ CWE-532（https://cwe.mitre.org/data/definitions/532.html ）→ A09:2025（https://owasp.org/Top10/2025/A09_2025-Security_Logging_and_Alerting_Failures/ ）/ CWE-598 → A06:2025
+- **根拠**: ASVS v5.0.0-16.2.5 (L2: ログに残す機密データの制限), 14.2.1 (L1: URL・クエリに機密情報を載せない)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md ）/ CWE-532（https://cwe.mitre.org/data/definitions/532.html ）→ A09:2025（https://owasp.org/Top10/2025/A09_2025-Security_Logging_and_Alerting_Failures/ ）/ CWE-598 → A06:2025
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
 
 ### DATA-02 エラー時に内部情報を返さず、安全側に倒れる
@@ -318,7 +318,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 汎用メッセージ＋サーバー側ログ、例外時は拒否 / 🟡 一部で詳細を返す / ❌ スタックトレースを返す、または例外時に処理を継続
 - **重大度**: Medium（fail-open で認可を迂回できる場合は High）
 - **リスク**: 内部構造・ライブラリのバージョン・クエリが攻撃者に伝わり、次の攻撃の手がかりになる。例外時に検証が素通りする
-- **根拠**: ASVS v5.0.0-16.5.1 (L2), 16.5.3 (L2) / CWE-209（https://cwe.mitre.org/data/definitions/209.html ）, CWE-636 → OWASP Top 10:2025 A10（https://owasp.org/Top10/2025/A10_2025-Mishandling_of_Exceptional_Conditions/ ）
+- **根拠**: ASVS v5.0.0-16.5.1 (L2: 汎用のエラーメッセージ), 16.5.3 (L2: 安全側に倒れる) / CWE-209（https://cwe.mitre.org/data/definitions/209.html ）, CWE-636 → OWASP Top 10:2025 A10（https://owasp.org/Top10/2025/A10_2025-Mishandling_of_Exceptional_Conditions/ ）
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html
 
 ### DATA-03 セキュリティ上の出来事を記録している
@@ -327,7 +327,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 主要なイベントを記録 / 🟡 一部のみ / ❌ なし
 - **重大度**: Low（管理機能や金銭を扱う場合は Medium）
 - **リスク**: 攻撃や不正アクセスに気づけず、事後に被害範囲を調べられない
-- **根拠**: ASVS v5.0.0-16.3.1 (L2), 16.3.2 (L2), 16.4.1 (L2) / CWE-778（https://cwe.mitre.org/data/definitions/778.html ）→ A09:2025
+- **根拠**: ASVS v5.0.0-16.3.1 (L2: 認証イベントの記録), 16.3.2 (L2: 認可の失敗の記録), 16.4.1 (L2: ログ注入対策) / CWE-778（https://cwe.mitre.org/data/definitions/778.html ）→ A09:2025
 
 ### CFG-01 本番でデバッグ機能・開発用機能が無効になっている
 - **適用**: 常に
@@ -335,7 +335,7 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ 本番経路では無効 / 🟡 開発専用経路のみで有効（本番設定の分離を推奨）/ ❌ 本番で有効
 - **重大度**: High（Werkzeug のデバッガ等、対話コンソールが公開される場合は Critical）
 - **リスク**: スタックトレースや設定値の露出。対話型デバッガが公開されるとサーバー上で任意コードを実行される
-- **根拠**: ASVS v5.0.0-13.4.2 (L2), 15.2.3 (L2), 13.4.1 (L1) / CWE-489（https://cwe.mitre.org/data/definitions/489.html ）→ A02:2025 / CWE-215 → A10:2025
+- **根拠**: ASVS v5.0.0-13.4.2 (L2: 本番でデバッグモードを無効化), 15.2.3 (L2: 開発用機能を本番に含めない), 13.4.1 (L1: .git など管理用メタデータの非公開) / CWE-489（https://cwe.mitre.org/data/definitions/489.html ）→ A02:2025 / CWE-215 → A10:2025
 - **参考**: https://docs.djangoproject.com/en/stable/howto/deployment/checklist/ / https://flask.palletsprojects.com/en/stable/web-security/ / https://expressjs.com/en/advanced/best-practice-security.html
 
 ### API-01 レート制限とリソース消費の上限がある
@@ -345,5 +345,5 @@ IPA「安全なウェブサイトの作り方」（改訂第7版, https://www.ip
 - **判定**: ✅ コストの高い処理に制限 / 🟡 全体の緩い制限のみ / ❌ なし
 - **重大度**: Medium（従量課金の外部 API を呼ぶ処理は High になりうる）
 - **リスク**: サービス停止、クラウドや外部 API の高額請求、データの大量取得
-- **根拠**: ASVS v5.0.0-2.4.1 (L2), 15.2.2 (L2), 4.3.1 (L2) / CWE-770（https://cwe.mitre.org/data/definitions/770.html ）/ OWASP API4:2023（https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/ ）
+- **根拠**: ASVS v5.0.0-2.4.1 (L2: 自動化・大量呼び出しへの対策), 15.2.2 (L2: 重い処理の保護), 4.3.1 (L2: GraphQL の深さ・コスト制限) / CWE-770（https://cwe.mitre.org/data/definitions/770.html ）/ OWASP API4:2023（https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/ ）
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html

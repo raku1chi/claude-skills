@@ -29,7 +29,7 @@ Dockerfile、docker-compose、Kubernetes マニフェスト、Terraform 等が�
 - **重大度**: High（秘密情報がイメージに入る）/ Medium（`.git` 等のみ）
 - **リスク**: イメージを取得できる人（レジストリ権限の保有者、公開イメージなら誰でも）に秘密情報やソースの履歴が渡る。ENV・ARG の値はイメージの履歴に残る
 - **対応方針**: `.dockerignore` を追加、マルチステージビルドで成果物だけをコピー、秘密情報は `--mount=type=secret` か実行時の環境変数で渡す
-- **根拠**: ASVS v5.0.0-13.3.1 (L2), 13.4.1 (L1)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x22-V13-Configuration.md ）/ CWE-540（https://cwe.mitre.org/data/definitions/540.html ）→ A01:2025
+- **根拠**: ASVS v5.0.0-13.3.1 (L2: 秘密情報の管理の仕組み・ソースや成果物に秘密を含めない), 13.4.1 (L1: .git など管理用メタデータの非公開)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x22-V13-Configuration.md ）/ CWE-540（https://cwe.mitre.org/data/definitions/540.html ）→ A01:2025
 - **参考**: https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html
 
 ### CTR-04 コンテナの実行権限が絞られている

@@ -104,7 +104,7 @@
 - **重大度**: High（署名・暗号化の鍵がフォールバック可能なら Critical: トークン偽造につながる）
 - **リスク**: 環境変数の設定漏れに気づかず、ソースに書かれた既定値（誰でも読める）で署名・暗号化され、トークンやセッションを偽造される
 - **対応方針**: 必須の設定値は未設定なら起動時にエラーにする。シークレットマネージャ・最小権限・定期ローテーション
-- **根拠**: ASVS v5.0.0-13.3.1 (L2), 13.3.2 (L2), 13.3.4 (L3) / CWE-1188（https://cwe.mitre.org/data/definitions/1188.html ）/ CWE-798
+- **根拠**: ASVS v5.0.0-13.3.1 (L2: 秘密情報の管理の仕組み・ソースや成果物に秘密を含めない), 13.3.2 (L2: 秘密情報へのアクセスの最小権限), 13.3.4 (L3: 秘密情報の期限とローテーション) / CWE-1188（https://cwe.mitre.org/data/definitions/1188.html ）/ CWE-798
 
 ---
 
@@ -127,7 +127,7 @@
 - **重大度**: Medium
 - **リスク**: 修正済みの脆弱性を含む古い依存関係を使い続ける
 - **対応方針**: `.github/dependabot.yml`（または Renovate）で全エコシステムと github-actions を対象にし、Dependabot security updates も有効化
-- **根拠**: ASVS v5.0.0-15.1.1 (L1), 15.2.1 (L1)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x24-V15-Secure-Coding-and-Architecture.md ）/ Scorecard Dependency-Update-Tool / CWE-1104 → A03:2025
+- **根拠**: ASVS v5.0.0-15.1.1 (L1: 更新期限の文書化), 15.2.1 (L1: 期限内の更新)（https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x24-V15-Secure-Coding-and-Architecture.md ）/ Scorecard Dependency-Update-Tool / CWE-1104 → A03:2025
 - **参考**: https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configure-version-updates
 
 ### SCA-03 既知の脆弱性を持つ依存関係を検出している
@@ -147,7 +147,7 @@
 - **重大度**: High（疑わしい依存が見つかった場合）/ Low（仕組みの欠如のみ）
 - **リスク**: AI が提案した実在しないパッケージ名を攻撃者が先に登録しておく手口（slopsquatting）やタイポスクワットで、マルウェアを取り込む。インストール時のスクリプトで開発機や CI の秘密情報が盗まれる
 - **対応方針**: 追加前にレジストリで実在・メンテナ・ソースリポジトリを確認。dependency-review-action で差分をレビュー。npm では `ignore-scripts` を検討
-- **根拠**: OWASP Top 10:2025 A03 / ASVS v5.0.0-15.1.2 (L2), 15.2.4 (L3) / OWASP CICD-SEC-3 Dependency Chain Abuse / OWASP Secure Coding with AI Cheat Sheet「Hallucinated Dependencies」（https://cheatsheetseries.owasp.org/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.html ）
+- **根拠**: OWASP Top 10:2025 A03 / ASVS v5.0.0-15.1.2 (L2: SBOM と信頼できる取得元), 15.2.4 (L3: 依存関係の取り違え（dependency confusion）) / OWASP CICD-SEC-3 Dependency Chain Abuse / OWASP Secure Coding with AI Cheat Sheet「Hallucinated Dependencies」（https://cheatsheetseries.owasp.org/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.html ）
 
 ### SCA-05 配布物の完全性を検証できる（署名・来歴・SBOM）
 - **適用**: パッケージ・バイナリ・コンテナイメージを配布・公開している（Web サービスのみなら ➖対象外）
