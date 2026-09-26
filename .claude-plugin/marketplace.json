@@ -9,7 +9,6 @@
     {
       "name": "security-posture-check",
       "description": "リポジトリのセキュリティ対策を OWASP ASVS 5.0・OWASP Top 10:2025・NIST SSDF などの基準に照らして証拠ベースで診断し、優先度付きの対応方針を出す。結果は Markdown レポートか GitHub Issues にできる",
-      "category": "security",
       "source": "./",
       "strict": false,
       "skills": ["./skills/security-posture-check"]
