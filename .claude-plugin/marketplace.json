@@ -1,0 +1,18 @@
+{
+  "name": "raku1chi-skills",
+  "description": "raku1chi の自作 Claude Code スキル集",
+  "owner": {
+    "name": "raku1chi",
+    "url": "https://github.com/raku1chi"
+  },
+  "plugins": [
+    {
+      "name": "security-posture-check",
+      "description": "リポジトリのセキュリティ対策を OWASP ASVS 5.0・OWASP Top 10:2025・NIST SSDF などの基準に照らして証拠ベースで診断し、優先度付きの対応方針を出す。結果は Markdown レポートか GitHub Issues にできる",
+      "category": "security",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/security-posture-check"]
+    }
+  ]
+}
