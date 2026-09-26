@@ -563,6 +563,7 @@ POSITIVE_RULES = [
     ("security-logging", r"\b(?:logger|log|logging|winston|pino|bunyan|structlog|zap|logrus|slog)\.(?:warn|warning|error|info|critical|audit)\s*\([^)\n]*(?:login|logon|sign.?in|auth|unauthori[sz]ed|forbidden|denied|failed|invalid (?:password|token|credentials))", re.I),
     ("cookie-security-flags", r"httpOnly\s*:\s*true|secure\s*:\s*true|sameSite\s*:|SESSION_COOKIE_SECURE\s*=\s*True|SESSION_COOKIE_HTTPONLY\s*=\s*True|CSRF_COOKIE_SECURE\s*=\s*True|SESSION_COOKIE_SAMESITE|cookie_secure|HttpOnly;|SameSite=", 0),
     ("output-sanitization", r"DOMPurify\.sanitize|sanitizeHtml\s*\(|bleach\.clean|nh3\.clean|htmlspecialchars\s*\(|html\.escape\s*\(|markupsafe\.escape|escapeHtml\s*\(", 0),
+    ("proxy-aware-client-ip", r"trust proxy|\bProxyFix\b|SECURE_PROXY_SSL_HEADER|USE_X_FORWARDED_HOST|forwarded_allow_ips|ForwardedHeaders|real_ip_header|set_real_ip_from|trustedProxies|SetTrustedProxies", 0),
     ("request-limits", r"(?:json|urlencoded|raw|text)\s*\(\s*\{[^}\n]*limit\s*:|bodyLimit|MAX_CONTENT_LENGTH|DATA_UPLOAD_MAX_MEMORY_SIZE|client_max_body_size|maxFileSize|fileSize\s*:|max_request_size|MaxBytesReader|max_tokens|maxTokens|max_output_tokens", 0),
 ]
 POSITIVE_NEEDLES = {
@@ -584,6 +585,8 @@ POSITIVE_NEEDLES = {
     "cookie-security-flags": ("httponly", "secure", "samesite", "session_cookie", "csrf_cookie", "cookie_secure"),
     "output-sanitization": ("dompurify", "sanitizehtml", "bleach", "nh3", "htmlspecialchars", "html.escape",
                             "markupsafe", "escapehtml"),
+    "proxy-aware-client-ip": ("trust proxy", "proxyfix", "secure_proxy_ssl_header", "use_x_forwarded_host",
+                              "forwarded_allow_ips", "forwardedheaders", "real_ip", "trustedproxies"),
     "request-limits": ("limit", "max_content_length", "data_upload_max_memory_size", "client_max_body_size",
                        "maxfilesize", "filesize", "max_request_size", "maxbytesreader", "max_tokens", "maxtokens",
                        "max_output_tokens"),
@@ -984,6 +987,7 @@ class Collector:
 
         self.deps = deps
         self.r["manifests"] = results
+        self.r["runtimes"] = self._runtimes()
 
         def pick(table, prefix_table=None):
             found = {}
@@ -1011,6 +1015,59 @@ class Collector:
         self.r["security_libraries"] = {k: sorted(v) for k, v in sorted(sec.items())}
         self.r["datastores"] = pick(DATASTORES)
         self.r["llm_libraries"] = sorted(d for d in deps if d in LLM_LIBS)
+
+    def _runtimes(self):
+        """Declared runtime/toolchain versions, so a reviewer can check end-of-life status."""
+        found = []
+
+        def add(what, version, where):
+            if version:
+                found.append({"runtime": what, "version": str(version).strip()[:40], "where": where})
+
+        for rel, text in self.texts.items():
+            name = rel.rsplit("/", 1)[-1]
+            if is_vendored(rel):
+                continue
+            if name == "go.mod":
+                m = re.search(r"^go\s+(\S+)", text, re.M)
+                add("Go", m and m.group(1), rel)
+                m = re.search(r"^toolchain\s+(\S+)", text, re.M)
+                add("Go toolchain", m and m.group(1), rel)
+            elif name == "package.json":
+                try:
+                    eng = (json.loads(text).get("engines") or {})
+                except (ValueError, AttributeError):
+                    eng = {}
+                add("Node.js (engines)", eng.get("node"), rel)
+            elif name in (".nvmrc", ".node-version"):
+                add("Node.js", text.strip().splitlines()[0] if text.strip() else None, rel)
+            elif name in (".python-version", "runtime.txt"):
+                add("Python", text.strip().splitlines()[0] if text.strip() else None, rel)
+            elif name == "pyproject.toml":
+                m = re.search(r"requires-python\s*=\s*[\"']([^\"']+)", text)
+                add("Python (requires-python)", m and m.group(1), rel)
+            elif name == ".tool-versions":
+                for line in text.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2 and not line.startswith("#"):
+                        add(parts[0], parts[1], rel)
+            elif name == ".ruby-version":
+                add("Ruby", text.strip(), rel)
+            elif name == "Gemfile":
+                m = re.search(r"^\s*ruby\s+['\"]([^'\"]+)", text, re.M)
+                add("Ruby", m and m.group(1), rel)
+            elif name == "composer.json":
+                try:
+                    add("PHP", (json.loads(text).get("require") or {}).get("php"), rel)
+                except (ValueError, AttributeError):
+                    pass
+            elif name.endswith(".csproj"):
+                m = re.search(r"<TargetFrameworks?>([^<]+)</TargetFrameworks?>", text)
+                add(".NET", m and m.group(1), rel)
+            if rel.startswith(".github/workflows/"):
+                for m in re.finditer(r"(node|python|go|java|ruby|dotnet|php)-version\s*:\s*['\"]?([^\s'\"#]+)", text):
+                    add(m.group(1) + " (CI)", m.group(2), "%s:%d" % (rel, line_of(text, m.start())))
+        return found[:30]
 
     @staticmethod
     def _norm(name):
@@ -1232,6 +1289,7 @@ class Collector:
         rep["long_lived_cloud_secrets"] = sorted(set(LONG_LIVED_CLOUD_SECRET_RE.findall(text)))
         rep["secrets_referenced"] = len(set(re.findall(r"secrets\.([A-Za-z0-9_]+)", text)))
         rep["tools_fetched_at_latest"] = [line_of(text, m.start()) for m in re.finditer(r"@latest\b", text)][:10]
+        rep["continue_on_error"] = [line_of(text, m.start()) for m in re.finditer(r"continue-on-error\s*:\s*true", text)][:10]
         rep["_tools"] = [n for n, rx in CI_SECURITY_TOOLS if re.search(rx, text, re.I)]
         rep["_tests"] = [m.group(0).strip() for m in CI_TEST_RE.finditer(text)]
         return rep
@@ -1734,6 +1792,8 @@ def render_md(r):
     w("- security libraries: %s" % (", ".join("%s: %s" % (k, ", ".join(v)) for k, v in r["security_libraries"].items()) or "none detected"))
     w("- datastores/ORMs: %s" % (", ".join(r["datastores"].keys()) or "none detected"))
     w("- LLM/AI libraries: %s" % (", ".join(r["llm_libraries"]) or "none detected"))
+    w("- declared runtimes/toolchains (check end-of-life): %s" % (
+        ", ".join("%s %s (%s)" % (x["runtime"], x["version"], x["where"]) for x in r["runtimes"]) or "none declared"))
     ep = r["entrypoints"]
     w("- route/entrypoint files: %d%s" % (ep["files_with_routes"], (" — top: " + ", ".join("%s (%d)" % kv for kv in ep["top"][:12])) if ep["top"] else ""))
     if r["auth_related_files"]:
@@ -1789,6 +1849,8 @@ def render_md(r):
                 flags.append("long-lived cloud credentials: " + ", ".join(wf["long_lived_cloud_secrets"]))
             if wf["tools_fetched_at_latest"]:
                 flags.append("tools fetched at @latest (unpinned) on L" + ",".join(map(str, wf["tools_fetched_at_latest"])))
+            if wf["continue_on_error"]:
+                flags.append("continue-on-error: true on L" + ",".join(map(str, wf["continue_on_error"])) + " (failures are ignored)")
             if flags:
                 w("- notes: " + "; ".join(flags))
             w("- secrets referenced: %d" % wf["secrets_referenced"])
