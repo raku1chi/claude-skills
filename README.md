@@ -10,7 +10,54 @@
 
 ## インストール
 
-### Claude Code（すべてのプロジェクトで使う）
+### プラグインとして入れる（おすすめ）
+
+このリポジトリは Claude Code のプラグインマーケットプレイスになっている。Claude Code のセッションで次を実行する。
+
+```
+/plugin marketplace add raku1chi/claude-skills
+/plugin install security-posture-check@raku1chi-skills
+```
+
+`/plugin install` を実行するとプラグインの詳細が開くので、使う範囲（スコープ）を選んでインストールする。
+
+- **user**: 自分の、すべてのプロジェクトで使う
+- **project**: そのリポジトリで作業する全員で使う（下の「チームで使う」を参照）
+- **local**: 自分だけが、そのリポジトリでだけ使う
+
+シェルからも入れられる（既定は user。`--scope project` か `--scope local` を付けると変えられる）。
+
+```bash
+claude plugin marketplace add raku1chi/claude-skills
+claude plugin install security-posture-check@raku1chi-skills
+```
+
+#### チームで使う
+
+対象のリポジトリで次を実行し、書き換わった `.claude/settings.json` をコミットする。マーケットプレイスの登録とプラグインの有効化がどちらもこのファイルに入る。
+
+```bash
+claude plugin marketplace add raku1chi/claude-skills --scope project
+claude plugin install security-posture-check@raku1chi-skills --scope project
+```
+
+ほかのメンバーは、そのリポジトリで Claude Code を開き、フォルダーを信頼すれば使える。使えない場合は、上の `claude plugin install` を一度実行する。
+
+#### 更新
+
+自分で追加したマーケットプレイスは、既定では自動更新されない。`/plugin` の **Marketplaces** タブで `raku1chi-skills` を選び、**Enable auto-update** を選ぶと自動で更新される。手動で更新するときは次を実行する。
+
+```bash
+claude plugin update security-posture-check@raku1chi-skills
+```
+
+更新した内容は、次のセッションか `/reload-plugins` の実行後に反映される。
+
+### スキルとして直接置く
+
+マーケットプレイスを使わずに、スキルのディレクトリを Claude Code のスキル置き場に置いてもよい。
+
+#### すべてのプロジェクトで使う
 
 ```bash
 git clone https://github.com/raku1chi/claude-skills.git ~/src/claude-skills
@@ -20,7 +67,7 @@ ln -s ~/src/claude-skills/skills/security-posture-check ~/.claude/skills/securit
 
 シンボリックリンクにしておくと、`git pull` するだけで更新が反映される。
 
-### Claude Code（特定のプロジェクトだけで使う）
+#### 特定のプロジェクトだけで使う
 
 ```bash
 mkdir -p .claude/skills
@@ -29,7 +76,7 @@ cp -r ~/src/claude-skills/skills/security-posture-check .claude/skills/
 
 ## 使い方
 
-Claude Code で次のように頼むと、スキルが使われる（`/security-posture-check` で明示的に呼び出してもよい）。
+Claude Code で次のように頼むと、スキルが使われる（`/security-posture-check` で明示的に呼び出してもよい。プラグインとして入れた場合の正式な名前は `/security-posture-check:security-posture-check`）。
 
 - 「このリポジトリのセキュリティ診断をして、対応方針を出して」
 - 「公開前にセキュリティで足りないところを洗い出して。結果は security-reports/ に保存して」
@@ -46,9 +93,27 @@ Claude Code で次のように頼むと、スキルが使われる（`/security-
 ## ディレクトリ構成
 
 ```
+.claude-plugin/
+└── marketplace.json    # マーケットプレイスの定義（スキル 1 つにつき 1 エントリ）
 skills/
 └── <skill-name>/
     ├── SKILL.md        # スキル本体（frontmatter の name / description と手順）
     ├── scripts/        # スキルが実行するスクリプト
     └── references/     # 必要なときだけ読み込む参考資料
 ```
+
+### スキルを追加するとき
+
+`.claude-plugin/marketplace.json` の `plugins` に次のエントリを足し、`claude plugin validate .` で確かめる。`skills` に挙げたスキルだけがそのプラグインに入る。
+
+```json
+{
+  "name": "<skill-name>",
+  "description": "<プラグイン一覧に出す説明>",
+  "source": "./",
+  "strict": false,
+  "skills": ["./skills/<skill-name>"]
+}
+```
+
+`version` は書かない。書かなければコミットごとに更新が届く。書くと、変更のたびに値を上げない限り利用者に更新が届かない。
