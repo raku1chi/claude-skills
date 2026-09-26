@@ -22,7 +22,7 @@
 `/plugin install` を実行するとプラグインの詳細が開くので、使う範囲（スコープ）を選んでインストールする。
 
 - **user**: 自分の、すべてのプロジェクトで使う
-- **project**: そのリポジトリで作業する全員で使う（`.claude/settings.json` に書かれるので、それをコミットする）
+- **project**: そのリポジトリで作業する全員で使う（下の「チームで使う」を参照）
 - **local**: 自分だけが、そのリポジトリでだけ使う
 
 シェルからも入れられる（既定は user。`--scope project` か `--scope local` を付けると変えられる）。
@@ -31,6 +31,17 @@
 claude plugin marketplace add raku1chi/claude-skills
 claude plugin install security-posture-check@raku1chi-skills
 ```
+
+#### チームで使う
+
+対象のリポジトリで次を実行し、書き換わった `.claude/settings.json` をコミットする。マーケットプレイスの登録とプラグインの有効化がどちらもこのファイルに入る。
+
+```bash
+claude plugin marketplace add raku1chi/claude-skills --scope project
+claude plugin install security-posture-check@raku1chi-skills --scope project
+```
+
+ほかのメンバーは、そのリポジトリで Claude Code を開き、フォルダーを信頼すれば使える。使えない場合は、上の `claude plugin install` を一度実行する。
 
 #### 更新
 
