@@ -1,6 +1,7 @@
 ---
 name: security-posture-check
 description: Assess a repository's security posture against authoritative standards (OWASP ASVS 5.0, OWASP Top 10:2025, API Security Top 10, LLM/Agentic Top 10, CWE Top 25, NIST SSDF, OpenSSF Scorecard). Judges each control as implemented / partial / missing / needs-verification with file:line evidence, explains for every finding why it failed and what happens if it is left unfixed (with links to the sources), and produces a prioritized remediation plan that the user can save as a Markdown report or turn into GitHub Issues. Also checks AI-assisted development risks (coding-agent permissions, MCP servers, hallucinated dependencies, LLM features). Use whenever the user asks for a security check, audit, assessment or gap analysis of a codebase, or asks what security measures are missing, including Japanese requests like セキュリティ診断, セキュリティチェック, 脆弱性チェック, 対策状況の確認, 対応方針, Issue化. For reviewing only the diff of a single PR, a diff-focused review fits better.
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/collect_signals.py *)
 ---
 
 # セキュリティ対策状況チェック
@@ -20,23 +21,23 @@ description: Assess a repository's security posture against authoritative standa
 5. **基準の ID はチェック項目のファイルから引用する。** ASVS の要件番号などを記憶から作らない。ファイルにない ID を使うのは、原典で確認できた場合だけ。1 つの項目に複数の ID が並んでいるときは、括弧内の説明（例: `1.5.1 (L1: XML 外部実体（XXE）)`）が指摘の内容に合うものだけを引用する。
 6. **重大度はルーブリックで決める。** 盛りも甘くもしない。既定値から調整したら理由を書く。
 7. **秘密情報の値を出力しない。** レポート・Issue・チャットのどこにも書かない。マスク表記（`AKIA...(20 chars)` のような先頭数文字と長さ）と位置だけを書く。
-8. **診断中は何も変更しない。** レポートの書き出しを除き、ファイルを編集しない。外部に通信するツールは実行前にユーザーに伝える。
+8. **診断中は何も変更しない。** レポートの書き出しを除き、ファイルを編集しない。外部と通信するツールは、実行前にユーザーの了承を得る。
 
 ## 進め方
 
 ### 1. 範囲と前提を決める
 
-- **対象**: 既定はカレントのリポジトリ全体。ディレクトリやモノレポの一部が指定されたらそこだけ。
+- **対象**: 既定はカレントのリポジトリ全体。ディレクトリやモノレポの一部が指定されたらそこだけ。ただし GOV・CICD・AIDEV と SEC-04・SCA-02 はリポジトリ単位の設定（`.github/`、SECURITY.md、`.claude/` など）で判定する。収集スクリプトはサブディレクトリを対象にしても、これらをリポジトリのルートから読む（signals では `<repo-root>/…` と表示される）。
 - **深さ**: 既定は該当する全領域。「ざっと」「クイックに」と言われたら GOV・SEC・SCA・CICD だけにする。
-- **前提**（重大度に効く）: 公開/非公開リポジトリか、インターネットに公開するサービスか、個人情報・決済情報を扱うか。README やデプロイ設定から推定し、分からなければ仮定としてレポートに明記する。ここでは質問せずに進める（作業を止めてユーザーに聞くのは、最後の出力先の確認だけ）。
+- **前提**（重大度に効く）: 公開/非公開リポジトリか、インターネットに公開するサービスか、個人情報・決済情報を扱うか。README やデプロイ設定から推定し、分からなければ仮定としてレポートに明記する。前提についてはここで質問せずに進める。作業を止めてユーザーに聞くのは、外部と通信するツールを実行する前（手順 2）と、最後の出力先・Issue 作成の確認（手順 8）だけ。
 
 ### 2. 事実を集める
 
 ```bash
-python3 <このスキルのディレクトリ>/scripts/collect_signals.py <対象ディレクトリ> --scan-history 300 --output <リポジトリ外の一時ディレクトリ>/signals.md
+python3 ${CLAUDE_SKILL_DIR}/scripts/collect_signals.py <対象ディレクトリ> --scan-history 300 --output <リポジトリ外の一時ディレクトリ>/signals.md
 ```
 
-出力（以下 signals）を最初から最後まで読む。出力先はリポジトリの外にする（診断でリポジトリを汚さないため）。これはローカルだけで動き、ファイルを変更せず、秘密情報をマスクして出力する。マニフェスト・ロックファイル、フレームワーク、CI の設定、秘密情報の候補（Git 履歴を含む）、Dockerfile・IaC、AI エージェントの設定、危険なコードパターンと対策の存在を示すコードの位置、ルートの一覧などが得られる。
+`${CLAUDE_SKILL_DIR}` はこの SKILL.md があるディレクトリに置き換わる（置き換わっていなければ、そのディレクトリのパスを使う）。出力（以下 signals）を最初から最後まで読む。出力先はリポジトリの外にする（診断でリポジトリを汚さないため）。これはローカルだけで動き、ファイルを変更せず、秘密情報をマスクして出力する。マニフェスト・ロックファイル、フレームワーク、CI の設定、秘密情報の候補（Git 履歴を含む）、Dockerfile・IaC、AI エージェントの設定、危険なコードパターンと対策の存在を示すコードの位置、ルートの一覧などが得られる。
 
 - Python が使えない場合は、同じ観点を Glob / Grep で確認する（マニフェストとロックファイル、`.github/workflows/`、SECURITY.md、Dockerfile、秘密情報らしき文字列、`.claude/settings.json`・`.mcp.json`）。
 - **リポジトリ外の設定**: `gh` が認証済みか、GitHub の MCP ツールがあれば、読み取り系の API で確かめる。公開/非公開（`gh repo view --json visibility`）、ブランチ保護（`gh api repos/{owner}/{repo}/rules/branches/{branch}`）、secret scanning と push protection（`gh api repos/{owner}/{repo} --jq .security_and_analysis`）、private vulnerability reporting（`gh api repos/{owner}/{repo}/private-vulnerability-reporting`）。権限が足りなければ要確認にする。
@@ -142,7 +143,7 @@ HTTP サーバーのない CLI やライブラリでは、web-application.md の
 
 ### 再診断（前回との比較）
 
-`security-reports/` に前回のレポートがあれば、付録 A の判定一覧どうしを比べ、「改善した項目」「悪化した項目」「新しく見つかった項目」をレポートの冒頭に載せる。以前作った Issue の状態も分かる範囲で添える。
+`security-reports/` に前回のレポートがあれば（リポジトリの外に保存した場合は、ユーザーが場所を示したとき）、付録 A の判定一覧どうしを比べ、「改善した項目」「悪化した項目」「新しく見つかった項目」をレポートの冒頭に載せる。以前作った Issue の状態も分かる範囲で添える（Issue の目印 `<!-- security-posture-check controls=… -->` で探せる）。
 
 ## 診断の限界（レポートに必ず書く）
 

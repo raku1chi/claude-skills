@@ -32,11 +32,20 @@ try:  # Python 3.11+
 except ImportError:  # pragma: no cover - older Pythons fall back to regex parsing
     tomllib = None
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 MAX_FILE_BYTES = 1_000_000
 MAX_FILES = 25_000
 SNIPPET_CHARS = 160
 EXAMPLES_PER_CATEGORY = 5
+REPO_ROOT_MARK = "<repo-root>/"
+
+
+def as_dict(v):
+    return v if isinstance(v, dict) else {}
+
+
+def as_list(v):
+    return v if isinstance(v, list) else []
 
 # ---------------------------------------------------------------------------
 # File classification
@@ -170,6 +179,16 @@ def is_vendored(rel):
     return any(p in SKIP_DIR_NAMES for p in parts)
 
 
+# Repository-wide configuration that lives at the repository root. When the scan
+# root is a subdirectory (e.g. one package of a monorepo) these still apply.
+REPO_LEVEL_DIRS = (".github/", ".claude/", ".husky/", ".circleci/", ".gitlab/", ".cursor/")
+REPO_LEVEL_FILES = {".vscode/mcp.json", ".gemini/settings.json", "docs/SECURITY.md", "docs/CODEOWNERS"}
+
+
+def is_repo_level(rel):
+    return "/" not in rel or rel.startswith(REPO_LEVEL_DIRS) or rel in REPO_LEVEL_FILES
+
+
 # ---------------------------------------------------------------------------
 # Secret detection
 # ---------------------------------------------------------------------------
@@ -254,6 +273,18 @@ SECRET_NEEDLES = {
 }
 CONFIG_ASSIGNMENT_NEEDLES = ("pass", "secret", "token", "key", "credential")
 HISTORY_RULE_IDS = {r[0] for r in SECRET_RULES if r[3] == "high"}
+PEM_HEADER_RE = re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----")
+PEM_BODY_RE = re.compile(r"(?:\\[rn]|\s)*([A-Za-z0-9+/=]{40,})")
+
+
+def secret_fingerprint(rid, value, text="", end=0):
+    """Hash that identifies a secret. A private key is identified by the start of
+    its body rather than its header, so that different keys stay distinct."""
+    if rid == "private-key":
+        m = PEM_BODY_RE.match(text, end)
+        if m:
+            value += m.group(1)[:40]
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def mask_secrets_in(text):
@@ -496,7 +527,7 @@ RISK_RULES = [
       r"(?<![\w$.])(?:fetch|axios(?:\.(?:get|post|put|delete|request))?|got|needle|http\.get|https\.get)\s*\(\s*(?:" + REQ_JS + ")",
       needles=("fetch", "axios", "got", "needle", "http")),
     R("ssrf", "Server-side request to a URL taken from request", "CWE-918", PY,
-      r"(?:requests|httpx|aiohttp|urllib\.request)\.\w+\s*\(\s*(?:" + REQ_PY + ")|urlopen\s*\(\s*(?:" + REQ_PY + ")",
+      r"(?:requests|httpx|aiohttp|urllib\.request)\.\w+\s*\(\s*(?:" + REQ_PY + r")|urlopen\s*\(\s*(?:" + REQ_PY + ")",
       needles=("requests", "httpx", "aiohttp", "urllib", "urlopen")),
     R("ssrf", "Server-side request / file read from request input", "CWE-918", PHP,
       r"(?:file_get_contents|fopen|curl_init)\s*\(\s*" + REQ_PHP, needles=("file_get_contents", "fopen", "curl_init")),
@@ -783,7 +814,12 @@ def line_text(text, pos):
     return text[start:end]
 
 
-def snippet(text, pos):
+def snippet(text, pos, mask_span=None):
+    """The line containing pos, with secrets masked. mask_span (start, end) on the
+    same line is masked unconditionally."""
+    if mask_span:
+        s, e = mask_span
+        text = text[:s] + mask(text[s:e]) + text[e:]
     s = line_text(text, pos).strip()
     s = mask_secrets_in(s)
     if len(s) > SNIPPET_CHARS:
@@ -794,6 +830,90 @@ def snippet(text, pos):
 def sanitize_remote(url):
     # Never print credentials embedded in a remote URL.
     return re.sub(r"(://)[^/@\s]+@", r"\1***@", url.strip())
+
+
+HIGH_IMPACT_COMMANDS = {
+    "rm", "curl", "wget", "sudo", "chmod", "chown", "ssh", "scp", "rsync", "sh", "bash", "zsh", "eval", "python",
+    "python3", "node", "npx", "bunx", "deno", "ruby", "perl", "docker", "kubectl", "terraform", "aws", "gcloud",
+    "az", "git", "gh", "nc", "dd",
+}
+INTERPRETERS = {"sh", "bash", "zsh", "python", "python3", "node", "ruby", "perl"}
+
+
+def classify_allow_rule(rule):
+    """Why a Claude Code permission rule grants broad access, or None."""
+    low = rule.strip().lower()
+    if low in ("bash", "bash(*)", "bash(:*)", "bash(**)", "bash(* *)"):
+        return "any shell command"
+    m = re.match(r"bash\((.+)\)$", low)
+    if m:
+        args = m.group(1).strip()
+        first_word = re.split(r"[\s:*]", args, maxsplit=1)[0]
+        if first_word in HIGH_IMPACT_COMMANDS:
+            parts = args.split()
+            # An interpreter pinned to one script file is narrow; the interpreter alone is not.
+            if first_word in INTERPRETERS and len(parts) > 1 \
+                    and re.match(r"[^\s*]+\.(?:py|sh|js|mjs|cjs|ts|rb|pl)(?::\*)?$", parts[1]):
+                return None
+            return "high-impact command family"
+    if low in ("webfetch", "webfetch(*)"):
+        return "any URL"
+    # "mcp__server" (no tool part) and "mcp__server__*" both allow every tool of the server.
+    if low.startswith("mcp__") and (low.endswith("*") or "__" not in low[5:]):
+        return "all tools of an MCP server"
+    return None
+
+
+FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
+
+
+def frontmatter_value(text, key):
+    """Value of a top-level key in a Markdown file's YAML frontmatter (str, list, or None)."""
+    fm = FRONTMATTER_RE.match(text or "")
+    if not fm:
+        return None
+    lines = fm.group(1).splitlines()
+    for i, line in enumerate(lines):
+        km = re.match(r"^%s\s*:\s*(.*)$" % re.escape(key), line)
+        if not km:
+            continue
+        val = km.group(1).split(" #", 1)[0].strip()
+        if val.startswith("[") and val.endswith("]"):
+            return val[1:-1]
+        if val and val[0] not in "|>":
+            return val.strip("'\"")
+        items, block = [], []
+        for l in lines[i + 1:]:
+            if l.strip() and not l.startswith((" ", "\t", "-")):
+                break
+            im = re.match(r"^\s*-\s+(.+)$", l)
+            if im:
+                items.append(im.group(1).strip().strip("'\""))
+            elif l.strip():
+                block.append(l.strip())
+        return items if items else " ".join(block)
+    return None
+
+
+def split_tools(value):
+    """Split an allowed-tools value into rules, keeping "Bash(npm run test *)" intact."""
+    if isinstance(value, list):
+        return [v for v in value if v]
+    out, buf, depth = [], "", 0
+    for ch in str(value or ""):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if depth == 0 and (ch.isspace() or ch == ","):
+            if buf:
+                out.append(buf.strip("'\""))
+            buf = ""
+            continue
+        buf += ch
+    if buf:
+        out.append(buf.strip("'\""))
+    return out
 
 
 def parse_github_slug(url):
@@ -822,6 +942,18 @@ class Collector:
         self.files = []          # tracked (or walked) relative paths
         self.texts = {}          # rel -> text for scanned files
         self.skipped = Counter()
+        # When the scan root is a subdirectory of a git repository, repository-level
+        # files (.github/, SECURITY.md, ...) and lockfiles above it are read from the
+        # repository root. They are keyed by their path from the repository root and
+        # shown with REPO_ROOT_MARK.
+        self.top = self.root
+        self.prefix = ""
+        self.repo_level_files = []
+        self.top_lockfiles = set()
+        self.from_repo_root = set()
+
+    def disp(self, rel):
+        return REPO_ROOT_MARK + rel if rel in self.from_repo_root else rel
 
     # -- inventory ---------------------------------------------------------
     def inventory(self):
@@ -839,15 +971,25 @@ class Collector:
             info["last_commit_date"] = (git(root, "log", "-1", "--format=%cI") or "").strip() or None
             listing = git(root, "ls-files", "-z") or ""
             self.files = [p for p in listing.split("\0") if p]
+            self.prefix = (git(root, "rev-parse", "--show-prefix") or "").strip()
+            if self.prefix:
+                self.top = (git(root, "rev-parse", "--show-toplevel") or "").strip() or root
+                info["scan_subdirectory"] = self.prefix.rstrip("/")
+                info["repository_root"] = self.top
+                outside = [p for p in (git(self.top, "ls-files", "-z") or "").split("\0")
+                           if p and not p.startswith(self.prefix)]
+                self.repo_level_files = [p for p in outside if is_repo_level(p)]
+                self.top_lockfiles = {p for p in outside if p.rsplit("/", 1)[-1] in LOCKFILES}
         else:
             for dirpath, dirnames, filenames in os.walk(root):
                 dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES
                                and not os.path.exists(os.path.join(dirpath, d, "pyvenv.cfg"))]
                 for fn in filenames:
-                    rel = os.path.relpath(os.path.join(dirpath, fn), root).replace(os.sep, "/")
-                    self.files.append(rel)
-                    if len(self.files) >= MAX_FILES:
-                        break
+                    self.files.append(os.path.relpath(os.path.join(dirpath, fn), root).replace(os.sep, "/"))
+                if len(self.files) >= MAX_FILES:
+                    del self.files[MAX_FILES:]
+                    info["file_limit_reached"] = MAX_FILES
+                    break
         self.is_git = is_git
         self.fileset = set(self.files)
         self.r["git"] = info
@@ -898,21 +1040,43 @@ class Collector:
             n += 1
         self.r["scan"] = {"text_files_scanned": len(self.texts), "skipped": dict(self.skipped)}
 
+        # Namespace for repository-level lookups (governance, CI, AI agent config):
+        # the scan root's files, plus repository-root files it does not shadow.
+        self.meta_files = list(self.files)
+        self.meta_texts = dict(self.texts)
+        for rel in self.repo_level_files:
+            if rel in self.fileset:
+                continue
+            self.meta_files.append(rel)
+            self.from_repo_root.add(rel)
+            if rel.rsplit("/", 1)[-1] in LOCKFILES or pseudo_ext(rel) in BINARY_EXTS:
+                continue
+            text, _ = read_text(os.path.join(self.top, rel))
+            if text is not None:
+                self.meta_texts[rel] = text
+        self.meta_fileset = set(self.meta_files)
+        if self.from_repo_root:
+            self.r["scan"]["repository_root_files_read"] = len(self.from_repo_root)
+
     # -- manifests & dependencies -----------------------------------------
     def manifests(self):
         results = []
         deps = defaultdict(set)  # name -> manifests
 
         def has_lock(rel_dir, names):
-            d = rel_dir
-            while True:
-                for ln in names:
-                    cand = (d + "/" + ln) if d else ln
-                    if cand in self.fileset:
-                        return cand
-                if not d:
-                    return None
-                d = d.rsplit("/", 1)[0] if "/" in d else ""
+            # Walk up to the scan root, then (for a subdirectory scan) on up to the
+            # repository root: monorepos often keep one lockfile at the top.
+            for d, pool, mark in ((rel_dir, self.fileset, ""),
+                                  ((self.prefix + rel_dir).strip("/"), self.top_lockfiles, REPO_ROOT_MARK)):
+                while pool:
+                    for ln in names:
+                        cand = (d + "/" + ln) if d else ln
+                        if cand in pool:
+                            return mark + cand
+                    if not d:
+                        break
+                    d = d.rsplit("/", 1)[0] if "/" in d else ""
+            return None
 
         for rel in self.files:
             if is_vendored(rel):
@@ -927,13 +1091,13 @@ class Collector:
                          "lockfile": has_lock(rel_dir, ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
                                                         "pnpm-lock.yaml", "bun.lock", "bun.lockb"])}
                 try:
-                    data = json.loads(text or "{}")
+                    data = as_dict(json.loads(text or "{}"))
                     for key in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
-                        names |= set((data.get(key) or {}).keys())
+                        names |= set(as_dict(data.get(key)))
                     entry["has_renovate_key"] = "renovate" in data
-                    scripts = data.get("scripts") or {}
+                    scripts = as_dict(data.get("scripts"))
                     entry["install_scripts"] = sorted(k for k in scripts if k in ("preinstall", "install", "postinstall", "prepare"))
-                except (ValueError, AttributeError):
+                except ValueError:
                     entry["parse_error"] = True
             elif name == "pyproject.toml":
                 entry = {"path": rel, "ecosystem": "python",
@@ -959,8 +1123,8 @@ class Collector:
             elif name == "composer.json":
                 entry = {"path": rel, "ecosystem": "php", "lockfile": has_lock(rel_dir, ["composer.lock"])}
                 try:
-                    data = json.loads(text or "{}")
-                    names |= set((data.get("require") or {}).keys()) | set((data.get("require-dev") or {}).keys())
+                    data = as_dict(json.loads(text or "{}"))
+                    names |= set(as_dict(data.get("require"))) | set(as_dict(data.get("require-dev")))
                 except ValueError:
                     entry["parse_error"] = True
             elif name == "pom.xml":
@@ -1024,10 +1188,11 @@ class Collector:
             if version:
                 found.append({"runtime": what, "version": str(version).strip()[:40], "where": where})
 
-        for rel, text in self.texts.items():
-            name = rel.rsplit("/", 1)[-1]
-            if is_vendored(rel):
+        for key, text in self.meta_texts.items():
+            name = key.rsplit("/", 1)[-1]
+            if is_vendored(key):
                 continue
+            rel = self.disp(key)
             if name == "go.mod":
                 m = re.search(r"^go\s+(\S+)", text, re.M)
                 add("Go", m and m.group(1), rel)
@@ -1035,8 +1200,8 @@ class Collector:
                 add("Go toolchain", m and m.group(1), rel)
             elif name == "package.json":
                 try:
-                    eng = (json.loads(text).get("engines") or {})
-                except (ValueError, AttributeError):
+                    eng = as_dict(as_dict(json.loads(text)).get("engines"))
+                except ValueError:
                     eng = {}
                 add("Node.js (engines)", eng.get("node"), rel)
             elif name in (".nvmrc", ".node-version"):
@@ -1058,13 +1223,13 @@ class Collector:
                 add("Ruby", m and m.group(1), rel)
             elif name == "composer.json":
                 try:
-                    add("PHP", (json.loads(text).get("require") or {}).get("php"), rel)
-                except (ValueError, AttributeError):
+                    add("PHP", as_dict(as_dict(json.loads(text)).get("require")).get("php"), rel)
+                except ValueError:
                     pass
             elif name.endswith(".csproj"):
                 m = re.search(r"<TargetFrameworks?>([^<]+)</TargetFrameworks?>", text)
                 add(".NET", m and m.group(1), rel)
-            if rel.startswith(".github/workflows/"):
+            if key.startswith(".github/workflows/"):
                 for m in re.finditer(r"(node|python|go|java|ruby|dotnet|php)-version\s*:\s*['\"]?([^\s'\"#]+)", text):
                     add(m.group(1) + " (CI)", m.group(2), "%s:%d" % (rel, line_of(text, m.start())))
         return found[:30]
@@ -1150,53 +1315,55 @@ class Collector:
 
     # -- repository governance ---------------------------------------------
     def governance(self):
-        fs = self.fileset
+        fs = self.meta_fileset
 
         def first(*cands):
             for c in cands:
                 if c in fs:
-                    return c
+                    return self.disp(c)
             return None
 
+        husky = next((f for f in self.meta_files if f.startswith(".husky/")), None)
         gov = {
             "security_policy": first("SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md", "SECURITY.rst", "SECURITY.txt"),
             "codeowners": first("CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"),
-            "license": next((f for f in self.files if re.match(r"(?i)^(LICEN[CS]E|COPYING)(\.\w+)?$", f)), None),
-            "gitignore": ".gitignore" if ".gitignore" in fs else None,
+            "license": next((self.disp(f) for f in self.meta_files if re.match(r"(?i)^(LICEN[CS]E|COPYING)(\.\w+)?$", f)), None),
+            "gitignore": first(".gitignore"),
             "pre_commit": first(".pre-commit-config.yaml", ".pre-commit-config.yml", "lefthook.yml", ".lefthook.yml")
-                          or (".husky/" if any(f.startswith(".husky/") for f in self.files) else None),
+                          or ((REPO_ROOT_MARK if husky in self.from_repo_root else "") + ".husky/" if husky else None),
             "secret_scanning_config": first(".gitleaks.toml", ".secrets.baseline", ".trufflehog.yml", ".gitguardian.yaml"),
         }
-        dependabot = first(".github/dependabot.yml", ".github/dependabot.yaml")
+        dependabot = next((c for c in (".github/dependabot.yml", ".github/dependabot.yaml") if c in fs), None)
         ecos = []
-        if dependabot and dependabot in self.texts:
-            ecos = sorted(set(re.findall(r"package-ecosystem:\s*['\"]?([\w\-]+)", self.texts[dependabot])))
+        if dependabot and dependabot in self.meta_texts:
+            ecos = sorted(set(re.findall(r"package-ecosystem:\s*['\"]?([\w\-]+)", self.meta_texts[dependabot])))
         renovate = first("renovate.json", "renovate.json5", ".renovaterc", ".renovaterc.json", ".github/renovate.json",
                          ".github/renovate.json5", ".gitlab/renovate.json")
         if not renovate and any(m.get("has_renovate_key") for m in self.r.get("manifests", [])):
             renovate = "package.json#renovate"
-        gov["dependency_updates"] = {"dependabot": dependabot, "dependabot_ecosystems": ecos, "renovate": renovate}
+        gov["dependency_updates"] = {"dependabot": dependabot and self.disp(dependabot), "dependabot_ecosystems": ecos,
+                                     "renovate": renovate}
         self.r["governance"] = gov
 
     # -- CI/CD ------------------------------------------------------------
     def ci(self):
-        workflows = [f for f in self.files if re.match(r"^\.github/workflows/[^/]+\.ya?ml$", f)]
-        actions = [f for f in self.files if re.match(r"^\.github/(?:actions/.+/)?action\.ya?ml$", f)]
-        other_ci = [f for f in self.files if f in (".gitlab-ci.yml", ".circleci/config.yml", "azure-pipelines.yml",
-                                                   "Jenkinsfile", "bitbucket-pipelines.yml", ".travis.yml",
-                                                   "cloudbuild.yaml", "buildspec.yml", ".drone.yml", "appveyor.yml")]
+        workflows = [f for f in self.meta_files if re.match(r"^\.github/workflows/[^/]+\.ya?ml$", f)]
+        actions = [f for f in self.meta_files if re.match(r"^\.github/(?:actions/.+/)?action\.ya?ml$", f)]
+        other_ci = [f for f in self.meta_files if f in (".gitlab-ci.yml", ".circleci/config.yml", "azure-pipelines.yml",
+                                                        "Jenkinsfile", "bitbucket-pipelines.yml", ".travis.yml",
+                                                        "cloudbuild.yaml", "buildspec.yml", ".drone.yml", "appveyor.yml")]
         tools, tests = set(), set()
         wf_reports = []
         for wf in workflows + actions:
-            text = self.texts.get(wf)
+            text = self.meta_texts.get(wf)
             if text is None:
                 continue
-            rep = self._analyze_workflow(wf, text)
+            rep = self._analyze_workflow(self.disp(wf), text)
             wf_reports.append(rep)
             tools |= set(rep.pop("_tools"))
             tests |= set(rep.pop("_tests"))
         for f in other_ci:
-            text = self.texts.get(f, "")
+            text = self.meta_texts.get(f, "")
             for name, rx in CI_SECURITY_TOOLS:
                 if re.search(rx, text, re.I):
                     tools.add(name)
@@ -1204,7 +1371,7 @@ class Collector:
                 tests.add(m.group(0).strip())
         self.r["ci"] = {
             "github_actions_workflows": len(workflows),
-            "other_ci_files": other_ci,
+            "other_ci_files": [self.disp(f) for f in other_ci],
             "security_tools_in_ci": sorted(tools),
             "test_commands_in_ci": sorted(tests)[:10],
             "workflows": wf_reports,
@@ -1265,7 +1432,9 @@ class Collector:
             if km:
                 rest = km.group(3).strip()
                 if rest[:1] in ("|", ">"):
-                    in_block, block_indent = True, len(km.group(1))
+                    # The block ends at the first line indented no deeper than the key
+                    # itself, e.g. the step's "env:" after "- run: |".
+                    in_block, block_indent = True, km.start(2)
                     continue
                 in_block = False
                 if UNTRUSTED_GHA_CTX.search(rest):
@@ -1340,7 +1509,7 @@ class Collector:
                     if rid == "gcp-service-account" and "private_key" not in text:
                         continue
                     per_rule[rid] += 1
-                    self._secret_hashes.add(hashlib.sha256(value.encode()).hexdigest())
+                    self._secret_hashes.add(secret_fingerprint(rid, value, text, m.end()))
                     if per_rule[rid] <= self.max_hits:
                         c = conf
                         if rid == "openai-api-key" and "T3BlbkFJ" in value:
@@ -1424,28 +1593,38 @@ class Collector:
             self.r["history_scan"] = {"performed": False, "error": "git not available"}
             return
         commit, date, path = None, None, None
+        pem_header = None  # a PEM header line whose body is expected on the next added line
+
+        def record(rid, value, masked, h):
+            if (rid, h) in seen:
+                return
+            seen.add((rid, h))
+            found.append({"rule": rid, "commit": commit, "date": date, "file": path, "value": masked,
+                          "still_in_working_tree": h in self._secret_hashes})
+
         for line in proc.stdout:
             lines_read += 1
             if lines_read > 3_000_000 or time.time() - start > 90:
                 truncated = True
                 break
+            header, pem_header = pem_header, None
             if line.startswith("__COMMIT__ "):
                 parts = line.split()
                 commit, date = parts[1][:12], (parts[2] if len(parts) > 2 else None)
             elif line.startswith("+++ "):
                 path = line[6:].strip() if line.startswith("+++ b/") else None
             elif line.startswith("+") and path:
+                added = line[1:]
+                if header and PEM_BODY_RE.fullmatch(added.rstrip("\r\n")):
+                    record("private-key", header, header[:40], secret_fingerprint("private-key", header, added))
+                hm = PEM_HEADER_RE.search(added)
+                if hm and not added[hm.end():].strip():
+                    pem_header = hm.group(0)
                 for rid, desc, rx, conf, group in hist_rules:
-                    for m in rx.finditer(line):
+                    for m in rx.finditer(added):
                         value = m.group(group) if group else m.group(0)
-                        h = hashlib.sha256(value.encode()).hexdigest()
-                        key = (rid, h)
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        found.append({"rule": rid, "commit": commit, "date": date, "file": path,
-                                      "value": mask(value) if group else value[:40],
-                                      "still_in_working_tree": h in self._secret_hashes})
+                        record(rid, value, mask(value) if group else value[:40],
+                               secret_fingerprint(rid, value, added, m.end()))
         proc.kill()
         proc.wait()
         self.r["history_scan"] = {"performed": True, "commits_requested": n_commits, "truncated": truncated,
@@ -1459,15 +1638,24 @@ class Collector:
             text = re.sub(r"\\\r?\n", " ", self.texts[df])
             rep = {"path": df}
             stages, images, final_user = set(), [], None
+            global_args, seen_from = {}, False
             for line in text.splitlines():
                 s = line.strip()
+                m = re.match(r"(?i)^ARG\s+(\w+)=['\"]?([^'\"\s]+)", s)
+                if m and not seen_from:  # ARGs before the first FROM can parameterize FROM
+                    global_args[m.group(1)] = m.group(2)
                 m = re.match(r"(?i)^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?", s)
                 if m:
-                    img = m.group(1)
+                    seen_from = True
+                    img = re.sub(r"\$\{?(\w+)\}?", lambda v: global_args.get(v.group(1), v.group(0)), m.group(1))
                     if m.group(2):
                         stages.add(m.group(2).lower())
                     final_user = None
                     if img.lower() in stages or img == "scratch":
+                        continue
+                    if "$" in img:  # set by a build argument without a default
+                        images.append({"image": img, "digest_pinned": False, "tag": None,
+                                       "latest_or_untagged": False, "build_arg": True})
                         continue
                     tag = img.split("@")[0].rsplit(":", 1)[1] if ":" in img.split("@")[0].split("/")[-1] else None
                     images.append({"image": img, "digest_pinned": "@sha256:" in img,
@@ -1483,7 +1671,7 @@ class Collector:
             rep["curl_pipe_shell"] = bool(re.search(r"(?:curl|wget)[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b", text))
             rep["secret_like_env_or_arg"] = sorted(set(
                 m.group(1) for m in re.finditer(r"(?im)^\s*(?:ENV|ARG)\s+([A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY)[A-Za-z0-9_]*)\s*[= ]\s*\S", text)))
-            rep["copies_whole_context"] = bool(re.search(r"(?im)^\s*(?:COPY|ADD)\s+(?:--\S+\s+)*\.\s+", text))
+            rep["copies_whole_context"] = bool(re.search(r"(?im)^\s*(?:COPY|ADD)\s+(?:--\S+\s+)*\./?\s+", text))
             d = df.rsplit("/", 1)[0] if "/" in df else ""
             rep["dockerignore"] = next((c for c in ((d + "/.dockerignore") if d else ".dockerignore", ".dockerignore")
                                         if c in self.fileset), None)
@@ -1549,65 +1737,49 @@ class Collector:
     # -- AI agent configuration ------------------------------------------------
     def ai_config(self):
         out = {}
-        instr = [f for f in self.files if f in ("CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules",
-                                                ".windsurfrules", ".github/copilot-instructions.md")
-                 or f.startswith(".cursor/rules/") or re.match(r"^[^/]+/(CLAUDE|AGENTS)\.md$", f)]
-        out["instruction_files"] = instr[:20]
-        out["claude_dirs"] = sorted(set(f.split("/")[1] for f in self.files if f.startswith(".claude/") and f.count("/") >= 2))
+        files, fileset, texts = self.meta_files, self.meta_fileset, self.meta_texts
+        instr = [f for f in files if f in ("CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules",
+                                           ".windsurfrules", ".github/copilot-instructions.md")
+                 or f.startswith((".cursor/rules/", ".claude/rules/", ".github/instructions/"))
+                 or re.match(r"^[^/]+/(CLAUDE|AGENTS)\.md$", f)]
+        out["instruction_files"] = [self.disp(f) for f in instr[:20]]
+        out["claude_dirs"] = sorted(set(f.split("/")[1] for f in files if f.startswith(".claude/") and f.count("/") >= 2))
         settings = []
         for f in (".claude/settings.json", ".claude/settings.local.json"):
-            if f not in self.fileset:
+            if f not in fileset:
                 continue
-            rep = {"path": f, "tracked": True}
+            rep = {"path": self.disp(f), "tracked": True}
             if f.endswith("settings.local.json"):
                 rep["note"] = "settings.local.json is meant to be personal and uncommitted"
             try:
-                data = json.loads(self.texts.get(f, "") or "{}")
+                data = json.loads(texts.get(f, "") or "{}")
             except ValueError:
+                data = None
+            if not isinstance(data, dict):
                 rep["parse_error"] = True
                 settings.append(rep)
                 continue
-            perms = data.get("permissions") or {}
-            allow = [str(x) for x in (perms.get("allow") or [])]
-            deny = [str(x) for x in (perms.get("deny") or [])]
+            perms = as_dict(data.get("permissions"))
+            allow = [str(x) for x in as_list(perms.get("allow"))]
+            deny = [str(x) for x in as_list(perms.get("deny"))]
             rep["allow"] = allow[:40]
             rep["deny"] = deny[:40]
-            rep["ask"] = [str(x) for x in (perms.get("ask") or [])][:20]
+            rep["ask"] = [str(x) for x in as_list(perms.get("ask"))][:20]
             rep["default_mode"] = perms.get("defaultMode") or data.get("defaultMode")
             rep["disable_bypass_permissions_mode"] = perms.get("disableBypassPermissionsMode")
             rep["additional_directories"] = perms.get("additionalDirectories")
-            broad = []
-            for rule in allow:
-                low = rule.strip().lower()
-                if low in ("bash", "bash(*)", "bash(:*)", "bash(**)", "bash(* *)"):
-                    broad.append(rule + "  <- any shell command")
-                    continue
-                m = re.match(r"bash\((.+)\)$", low)
-                if m:
-                    first_word = re.split(r"[\s:*]", m.group(1).strip(), 1)[0]
-                    if first_word in ("rm", "curl", "wget", "sudo", "chmod", "chown", "ssh", "scp", "rsync", "sh", "bash",
-                                      "zsh", "eval", "python", "python3", "node", "npx", "bunx", "deno", "ruby", "perl",
-                                      "docker", "kubectl", "terraform", "aws", "gcloud", "az", "git", "gh", "nc", "dd"):
-                        broad.append(rule + "  <- high-impact command family")
-                if low in ("webfetch", "webfetch(*)"):
-                    broad.append(rule + "  <- any URL")
-                if low.startswith("mcp__") and low.endswith("*"):
-                    broad.append(rule + "  <- all tools of an MCP server")
-            rep["broad_allow_rules"] = broad
+            rep["broad_allow_rules"] = ["%s  <- %s" % (rule, why) for rule in allow for why in [classify_allow_rule(rule)] if why]
             rep["denies_secret_reads"] = any(re.search(r"\.env|secret|\.pem|\.key|id_rsa|credentials|\.ssh", d, re.I) for d in deny)
             rep["enable_all_project_mcp_servers"] = data.get("enableAllProjectMcpServers")
             rep["enabled_mcpjson_servers"] = data.get("enabledMcpjsonServers")
-            hooks = data.get("hooks") or {}
             hook_cmds = []
-            if isinstance(hooks, dict):
-                for event, entries in hooks.items():
-                    for entry in entries or []:
-                        for h in (entry or {}).get("hooks", []) if isinstance(entry, dict) else []:
-                            if isinstance(h, dict) and h.get("command"):
-                                hook_cmds.append("%s: %s" % (event, mask_secrets_in(str(h["command"]))[:120]))
+            for event, entries in as_dict(data.get("hooks")).items():
+                for entry in as_list(entries):
+                    for h in as_list(as_dict(entry).get("hooks")):
+                        if isinstance(h, dict) and h.get("command"):
+                            hook_cmds.append("%s: %s" % (event, mask_secrets_in(str(h["command"]))[:120]))
             rep["hooks"] = hook_cmds[:20]
-            env = data.get("env") or {}
-            rep["env_literal_secrets"] = sorted(k for k, v in env.items()
+            rep["env_literal_secrets"] = sorted(k for k, v in as_dict(data.get("env")).items()
                                                 if re.search(r"(?i)key|token|secret|password", k) and isinstance(v, str)
                                                 and not is_placeholder(v))
             rep["api_key_helper"] = bool(data.get("apiKeyHelper"))
@@ -1615,19 +1787,38 @@ class Collector:
             settings.append(rep)
         out["claude_settings"] = settings
 
+        # Project skills and commands pre-approve tools through "allowed-tools" whenever
+        # they are invoked, even in a folder the user never trusted.
+        grants = []
+        for f in files:
+            if re.match(r"^\.claude/(?:skills/.+/SKILL|commands/.+|agents/.+)\.md$", f):
+                text = texts.get(f, "")
+                if f.startswith(".claude/agents/"):
+                    mode = frontmatter_value(text, "permissionMode")
+                    if isinstance(mode, str) and mode in ("bypassPermissions", "acceptEdits", "auto"):
+                        grants.append({"path": self.disp(f), "permission_mode": mode})
+                    continue
+                tools = split_tools(frontmatter_value(text, "allowed-tools"))
+                if tools:
+                    grants.append({"path": self.disp(f), "allowed_tools": tools[:20],
+                                   "broad": ["%s  <- %s" % (t, why) for t in tools for why in [classify_allow_rule(t)] if why]})
+        out["project_skill_grants"] = grants[:30]
+
         mcp = []
         for f in (".mcp.json", ".vscode/mcp.json", ".cursor/mcp.json", ".gemini/settings.json"):
-            if f not in self.fileset:
+            if f not in fileset:
                 continue
             try:
-                data = json.loads(self.texts.get(f, "") or "{}")
+                data = json.loads(texts.get(f, "") or "{}")
             except ValueError:
-                mcp.append({"path": f, "parse_error": True})
+                data = None
+            if not isinstance(data, dict):
+                mcp.append({"path": self.disp(f), "parse_error": True})
                 continue
-            servers = data.get("mcpServers") or data.get("servers") or {}
-            for name, cfg in (servers.items() if isinstance(servers, dict) else []):
-                cfg = cfg or {}
-                args = [str(a) for a in (cfg.get("args") or [])]
+            servers = as_dict(data.get("mcpServers") or data.get("servers"))
+            for name, cfg in servers.items():
+                cfg = as_dict(cfg)
+                args = [str(a) for a in as_list(cfg.get("args"))]
                 cmd = str(cfg.get("command") or "")
                 issues = []
                 if cmd in ("npx", "bunx", "pnpx", "uvx", "pipx") or (cmd == "pnpm" and "dlx" in args):
@@ -1636,7 +1827,7 @@ class Collector:
                     if pkg and not re.search(r"(?<!^)@\d|==\d", pkg):
                         issues.append("package not version-pinned: %s" % pkg)
                 for field in ("env", "headers"):
-                    for k, v in (cfg.get(field) or {}).items():
+                    for k, v in as_dict(cfg.get(field)).items():
                         if isinstance(v, str) and re.search(r"(?i)key|token|secret|password|authorization", k) and "${" not in v \
                                 and not is_placeholder(v.replace("Bearer ", "")):
                             issues.append("literal credential in %s.%s (%s)" % (field, k, mask(v)))
@@ -1646,7 +1837,7 @@ class Collector:
                 if any(rx.search(a) for a in args for _, _, rx, _, _ in SECRET_RULES_C):
                     issues.append("credential embedded in command arguments")
                 command = mask_secrets_in((cmd + " " + " ".join(args)).strip())
-                mcp.append({"path": f, "server": name, "command": command[:160] or None,
+                mcp.append({"path": self.disp(f), "server": name, "command": command[:160] or None,
                             "url": mask_secrets_in(url) or None, "type": cfg.get("type"), "issues": issues})
         out["mcp_servers"] = mcp
         self.r["ai_agent_config"] = out
@@ -1684,9 +1875,9 @@ class Collector:
                             continue
                     counts[rule["id"]] += 1
                     if counts[rule["id"]] <= self.max_hits:
-                        snip = snippet(text, m.start())
-                        if rule["mask_group"] and m.group(rule["mask_group"]):
-                            snip = snip.replace(m.group(rule["mask_group"]), mask(m.group(rule["mask_group"])))
+                        g = rule["mask_group"]
+                        span = m.span(g) if g and m.group(g) else None
+                        snip = snippet(text, m.start(), span)
                         hits.append({"rule": rule["id"], "title": rule["title"], "cwe": rule["cwe"], "file": rel,
                                      "line": line_of(text, m.start()), "snippet": snip,
                                      "test_path": is_test_path(rel)})
@@ -1766,8 +1957,15 @@ def render_md(r):
     if g.get("is_git_repo"):
         w("- git: remote=%s, github_repo=%s, branch=%s, HEAD=%s, commits=%s, last commit=%s" % (
             g.get("remote"), g.get("github_repo"), g.get("branch"), g.get("head"), g.get("commit_count"), g.get("last_commit_date")))
+        if g.get("scan_subdirectory"):
+            w("- **scope: subdirectory `%s` of the repository at %s** — repository-level files (%s…, and lockfiles above "
+              "the subdirectory) were read from the repository root and are shown as `%s…`; the git history scan covers "
+              "the whole repository" % (g["scan_subdirectory"], g["repository_root"], ", ".join(REPO_LEVEL_DIRS[:3]),
+                                        REPO_ROOT_MARK))
     else:
         w("- git: not a git repository (walked the directory tree)")
+        if g.get("file_limit_reached"):
+            w("- **file limit reached**: only the first %d files were inventoried" % g["file_limit_reached"])
     sc = r["scan"]
     w("- text files scanned: %d (skipped: %s)" % (sc["text_files_scanned"], ", ".join("%s=%d" % kv for kv in sc["skipped"].items()) or "none"))
     w("- languages (files): %s" % (", ".join("%s %d" % kv for kv in list(r["languages"].items())[:10]) or "none detected"))
@@ -1895,10 +2093,12 @@ def render_md(r):
     if ci_["dockerfiles"] or ci_["compose"] or ci_["kubernetes"] or ci_["terraform_files"]:
         w("## Containers & IaC")
         for d in ci_["dockerfiles"]:
-            imgs = ", ".join("%s%s" % (i["image"], " (unpinned/latest)" if i["latest_or_untagged"] else (" (digest)" if i["digest_pinned"] else ""))
+            imgs = ", ".join("%s%s" % (i["image"], " (build arg: check the value used in CI)" if i.get("build_arg") else
+                                       " (unpinned/latest)" if i["latest_or_untagged"] else (" (digest)" if i["digest_pinned"] else ""))
                              for i in d["base_images"]) or "-"
             w("- `%s`: base=%s; final USER=%s%s; dockerignore=%s; ADD remote URL=%s; curl|sh=%s; secret-like ENV/ARG=%s; COPY whole context=%s" % (
-                d["path"], imgs, d["final_stage_user"] or "(none)", " (**runs as root**)" if d["runs_as_root"] else "",
+                d["path"], imgs, d["final_stage_user"] or "(none)",
+                (" (**root**)" if d["final_stage_user"] else " (**root unless the base image sets USER**)") if d["runs_as_root"] else "",
                 d["dockerignore"] or "**none**", yn(d["add_remote_url"]), yn(d["curl_pipe_shell"]),
                 ", ".join(d["secret_like_env_or_arg"]) or "none", yn(d["copies_whole_context"])))
         for c in ci_["compose"]:
@@ -1918,7 +2118,7 @@ def render_md(r):
         w("")
 
     ai = r["ai_agent_config"]
-    if ai["instruction_files"] or ai["claude_settings"] or ai["mcp_servers"] or ai["claude_dirs"]:
+    if ai["instruction_files"] or ai["claude_settings"] or ai["mcp_servers"] or ai["claude_dirs"] or ai["project_skill_grants"]:
         w("## AI coding-agent configuration")
         if ai["instruction_files"]:
             w("- instruction files: %s" % ", ".join(ai["instruction_files"]))
@@ -1936,6 +2136,13 @@ def render_md(r):
                 w("  - broad allow rules: %s" % "; ".join(st["broad_allow_rules"]))
             if st["hooks"]:
                 w("  - hooks: %s" % "; ".join(st["hooks"][:5]))
+        for gr in ai["project_skill_grants"]:
+            if gr.get("permission_mode"):
+                w("- subagent `%s`: permissionMode=%s" % (gr["path"], gr["permission_mode"]))
+                continue
+            w("- project skill/command `%s` pre-approves (allowed-tools): %s%s" % (
+                gr["path"], ", ".join(gr["allowed_tools"]),
+                ("; **broad**: " + "; ".join(gr["broad"])) if gr["broad"] else ""))
         for m in ai["mcp_servers"]:
             if m.get("parse_error"):
                 w("- `%s`: could not parse JSON" % m["path"])
