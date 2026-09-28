@@ -34,13 +34,13 @@ Issue の作成は外部に公開される操作なので、**作る前に一覧
 <!-- security-posture-check controls=SEC-01,SEC-02 -->
 ```
 
-作成前に、開いている Issue からこの目印を探す。
+作成前に、閉じたものも含めて既存の Issue からこの目印を探す。
 
 ```bash
-gh issue list --repo <owner/repo> --state open --search "security-posture-check in:body" --json number,title,body --limit 100
+gh issue list --repo <owner/repo> --state all --search "security-posture-check in:body" --json number,title,state,body --limit 200
 ```
 
-同じチェック ID を含む Issue が既にあれば新しく作らず、状況の更新をコメントするかをユーザーに聞く。以前の Issue が閉じられているのに今回も未対応なら、再発として新しい Issue を作り、古い Issue の番号を本文で参照する。
+同じチェック ID を含む Issue が開いていれば新しく作らず、状況の更新をコメントするかをユーザーに聞く。閉じられているのに今回も未対応なら、再発として新しい Issue を作り、古い Issue の番号を本文で参照する。
 
 ## 4. ラベル
 

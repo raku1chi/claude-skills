@@ -36,7 +36,7 @@ OWASP Top 10:2025 の一覧（日本語名は公式訳）: A01 アクセス制�
 | OWASP Top 10 for Agentic Applications | 2026 年版（2025-12） | https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/ | エージェントのリスク（ASI01〜ASI10） |
 | OWASP Secure Coding with AI Cheat Sheet | 随時更新 | https://cheatsheetseries.owasp.org/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.html | AI 支援開発のリスク（架空の依存、間接プロンプトインジェクション、ルールファイル、テストの削除など 14 節） |
 | OWASP MCP Security / AI Agent Security / LLM Prompt Injection Prevention / RAG Security Cheat Sheet | 随時更新 | https://cheatsheetseries.owasp.org/cheatsheets/MCP_Security_Cheat_Sheet.html ほか | 対応方針の参考 |
-| Claude Code ドキュメント | 随時更新 | https://code.claude.com/docs/en/security / permissions / settings / mcp | AI コーディングエージェントの権限設定 |
+| Claude Code ドキュメント | 随時更新 | https://code.claude.com/docs/en/security / permissions / settings / mcp / skills | AI コーディングエージェントの権限設定（スキルの `allowed-tools` を含む） |
 | AI事業者ガイドライン（経済産業省・総務省） | 第 1.2 版（2026-03-31） | https://www.meti.go.jp/shingikai/mono_info_service/ai_shakai_jisso/20260331_report.html | 組織としての AI ガバナンス（コードの診断対象外。背景として紹介する場合のみ） |
 
 ## 基準を更新するときの手順

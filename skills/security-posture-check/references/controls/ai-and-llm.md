@@ -97,13 +97,13 @@ ASVS 5.0 には LLM 固有の要件はない。LLM の出力が SQL・HTML・コ
 ## AI 支援開発の環境
 
 ### AIDEV-01 AI コーディングエージェントの権限設定が最小限になっている
-- **適用**: `.claude/settings.json` など、AI エージェントの共有設定がリポジトリにある（なければ ➖対象外。推奨事項として触れるのはよい）
-- **確認方法**: signals の `claude_settings`（`broad allow rules`、`defaultMode`、`denies secret reads`、`enableAllProjectMcpServers`、`hooks`、`settings.local.json` の追跡）。他のエージェント（Cursor、Copilot、Gemini 等）の設定も同じ観点で読む
-- **判定**: ✅ 許可ルールが具体的で、秘密ファイルの読み取りを deny し、`bypassPermissions` を共有しない / 🟡 一部に広い許可 / ❌ `Bash(*)` などの無制限許可、`bypassPermissions`、`enableAllProjectMcpServers: true` を共有設定でコミット
+- **適用**: `.claude/settings.json`、`.claude/skills/`・`.claude/commands/`・`.claude/agents/` など、AI エージェントの共有設定がリポジトリにある（なければ ➖対象外。推奨事項として触れるのはよい）
+- **確認方法**: signals の `claude_settings`（`broad allow rules`、`defaultMode`、`denies secret reads`、`enableAllProjectMcpServers`、`hooks`、`settings.local.json` の追跡）と、`project skill/command … pre-approves (allowed-tools)`・`subagent … permissionMode` の行。スキルやコマンドの `allowed-tools` は、呼び出されたターンの間、許可の確認なしにそのツールを使わせる。フォルダーを信頼していなくても効くので、settings.json と同じ重さで読む。他のエージェント（Cursor、Copilot、Gemini 等）の設定も同じ観点で読む
+- **判定**: ✅ 許可ルールが具体的で、秘密ファイルの読み取りを deny し、`bypassPermissions` を共有しない / 🟡 一部に広い許可 / ❌ `Bash(*)` などの無制限許可（settings.json かスキルの `allowed-tools`）、`bypassPermissions`、`enableAllProjectMcpServers: true` を共有設定でコミット
 - **重大度**: Medium（本番の資格情報に届く環境では High）
 - **リスク**: リポジトリ内の文書・Issue・依存パッケージに仕込まれた指示（間接プロンプトインジェクション）で、エージェントが確認なしにコマンドを実行し、秘密情報の外部送信やファイルの破壊を行う。共有設定なのでチーム全員の環境に波及する
-- **対応方針**: allow は必要なコマンドに限定（例: `Bash(npm run test:*)`）、deny に `Read(./.env)`・`Read(./.env.*)`・`Read(./secrets/**)` 等、`defaultMode` の強い設定や `enableAllProjectMcpServers` は共有設定に書かない、個人用の設定は `settings.local.json`（Git 管理外）へ
-- **根拠**: Claude Code ドキュメント Security（https://code.claude.com/docs/en/security ）・Permissions（https://code.claude.com/docs/en/permissions ）・Settings（https://code.claude.com/docs/en/settings ）/ OWASP LLM03:2026 Excessive Agency / ASI02, ASI03 / OWASP Secure Coding with AI Cheat Sheet「Indirect Prompt Injection in the Development Loop」「Agent Runtime Sandboxing」（https://cheatsheetseries.owasp.org/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.html ）
+- **対応方針**: allow は必要なコマンドに限定（例: `Bash(npm run test:*)`）、deny に `Read(./.env)`・`Read(./.env.*)`・`Read(./secrets/**)` 等、`defaultMode` の強い設定や `enableAllProjectMcpServers` は共有設定に書かない、個人用の設定は `settings.local.json`（Git 管理外）へ。スキルの `allowed-tools` は同梱スクリプトなど必要なものだけに絞る（例: `Bash(${CLAUDE_SKILL_DIR}/scripts/check.sh *)`）
+- **根拠**: Claude Code ドキュメント Security（https://code.claude.com/docs/en/security ）・Permissions（https://code.claude.com/docs/en/permissions ）・Settings（https://code.claude.com/docs/en/settings ）・Skills「Pre-approve tools for a skill」（https://code.claude.com/docs/en/skills#pre-approve-tools-for-a-skill ）/ OWASP LLM03:2026 Excessive Agency / ASI02, ASI03 / OWASP Secure Coding with AI Cheat Sheet「Indirect Prompt Injection in the Development Loop」「Agent Runtime Sandboxing」（https://cheatsheetseries.owasp.org/cheatsheets/Secure_Coding_with_AI_Cheat_Sheet.html ）
 
 ### AIDEV-02 MCP サーバーの出所・権限・資格情報が管理されている
 - **適用**: `.mcp.json`（`.vscode/mcp.json`、`.cursor/mcp.json` 等）に MCP サーバーの設定がある
