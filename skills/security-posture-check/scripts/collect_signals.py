@@ -32,7 +32,7 @@ try:  # Python 3.11+
 except ImportError:  # pragma: no cover - older Pythons fall back to regex parsing
     tomllib = None
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 MAX_FILE_BYTES = 1_000_000
 MAX_FILES = 25_000
 SNIPPET_CHARS = 160
@@ -228,7 +228,8 @@ def mask(value):
 
 # (id, description, regex, confidence, value_group)
 SECRET_RULES = [
-    ("private-key", "Private key block", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----(?=(?:\\[rn]|\s)+[A-Za-z0-9+/=]{40,})", "high", 0),
+    # The body may follow armor headers ("Proc-Type: 4,ENCRYPTED", "Version: ...").
+    ("private-key", "Private key block", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----(?=(?:(?:\\[rn]|\s)+[A-Za-z][A-Za-z0-9-]*:[^\n\\]*)*(?:\\[rn]|\s)+[A-Za-z0-9+/=]{40,})", "high", 0),
     ("aws-access-key-id", "AWS access key ID", r"\b((?:AKIA|ASIA)[0-9A-Z]{16})\b", "high", 1),
     ("aws-secret-access-key", "AWS secret access key", r"(?i)aws_?secret_?access_?key[\"']?\s*[:=]\s*[\"']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])", "high", 1),
     ("github-token", "GitHub token", r"\b((?:gh[pousr]_[A-Za-z0-9]{36,255})|(?:github_pat_[A-Za-z0-9_]{22,255}))\b", "high", 1),
@@ -274,16 +275,24 @@ SECRET_NEEDLES = {
 CONFIG_ASSIGNMENT_NEEDLES = ("pass", "secret", "token", "key", "credential")
 HISTORY_RULE_IDS = {r[0] for r in SECRET_RULES if r[3] == "high"}
 PEM_HEADER_RE = re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----")
-PEM_BODY_RE = re.compile(r"(?:\\[rn]|\s)*([A-Za-z0-9+/=]{40,})")
+PEM_END_RE = re.compile(r"-----END (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----")
+PEM_B64_LINE_RE = re.compile(r"[A-Za-z0-9+/=]+")
+PEM_ARMOR_HEADER_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*:\s")  # "Proc-Type: 4,ENCRYPTED", "Version: ..."
+
+
+def pem_body(text, start):
+    """Base64 body of the PEM block whose header ends at start, also when the key
+    sits in a JSON or YAML string with "\\n" escapes."""
+    end = PEM_END_RE.search(text, start)
+    seg = text[start:end.start() if end else start + 8192].replace("\\r", "\n").replace("\\n", "\n")
+    return "".join(s for s in (l.strip() for l in seg.splitlines()) if PEM_B64_LINE_RE.fullmatch(s))
 
 
 def secret_fingerprint(rid, value, text="", end=0):
-    """Hash that identifies a secret. A private key is identified by the start of
-    its body rather than its header, so that different keys stay distinct."""
-    if rid == "private-key":
-        m = PEM_BODY_RE.match(text, end)
-        if m:
-            value += m.group(1)[:40]
+    """Hash that identifies a secret. A private key is identified by its whole body:
+    the first bytes of common formats (OpenSSH, PKCS#8) are the same for every key."""
+    if rid == "private-key" and text:
+        value += pem_body(text, end)
     return hashlib.sha256(value.encode()).hexdigest()
 
 
@@ -815,13 +824,18 @@ def line_text(text, pos):
 
 
 def snippet(text, pos, mask_span=None):
-    """The line containing pos, with secrets masked. mask_span (start, end) on the
-    same line is masked unconditionally."""
-    if mask_span:
-        s, e = mask_span
-        text = text[:s] + mask(text[s:e]) + text[e:]
-    s = line_text(text, pos).strip()
-    s = mask_secrets_in(s)
+    """The line containing pos, with secrets masked. The value at mask_span (on the
+    same line) is always masked, and so is every other copy of it on that line."""
+    s = line_text(text, pos)
+    a = mask_span[0] - (text.rfind("\n", 0, pos) + 1) if mask_span else -1
+    b = a + mask_span[1] - mask_span[0] if mask_span else -1
+    if 0 <= a < b <= len(s):  # the value may sit on a later line: os.getenv("KEY",\n "default")
+        value, masked = s[a:b], mask(s[a:b])
+        # Other copies, e.g. `if (key === "<same value>")`; a copy inside a longer word
+        # (an identifier such as `development` for "dev") is left alone.
+        other = re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(value))
+        s = other.sub(lambda _: masked, s[:a]) + masked + other.sub(lambda _: masked, s[b:])
+    s = mask_secrets_in(s.strip())
     if len(s) > SNIPPET_CHARS:
         s = s[:SNIPPET_CHARS - 3] + "..."
     return s
@@ -838,19 +852,32 @@ HIGH_IMPACT_COMMANDS = {
     "az", "git", "gh", "nc", "dd",
 }
 INTERPRETERS = {"sh", "bash", "zsh", "python", "python3", "node", "ruby", "perl"}
+# Commands that run whatever command or package they are given.
+COMMAND_RUNNERS = {"env", "xargs", "nohup", "timeout", "nice", "exec", "command", "uvx", "pipx"}
+COMMAND_RUNNER_PAIRS = {("npm", "exec"), ("pnpm", "exec"), ("pnpm", "dlx"), ("yarn", "dlx"), ("uv", "run"), ("bun", "x")}
 
 
 def classify_allow_rule(rule):
     """Why a Claude Code permission rule grants broad access, or None."""
     low = rule.strip().lower()
-    if low in ("bash", "bash(*)", "bash(:*)", "bash(**)", "bash(* *)"):
+    if low == "bash":
         return "any shell command"
-    m = re.match(r"bash\((.+)\)$", low)
+    m = re.match(r"bash\((.*)\)$", low)
     if m:
         args = m.group(1).strip()
-        first_word = re.split(r"[\s:*]", args, maxsplit=1)[0]
+        if not args.replace("*", "").replace(":", "").strip():  # Bash(*), Bash(:*), Bash(*:*), ...
+            return "any shell command"
+        parts = args.split()
+        first_word = os.path.basename(re.split(r"[\s:*]", args, maxsplit=1)[0])  # /usr/bin/curl -> curl
+        if first_word not in HIGH_IMPACT_COMMANDS:
+            first_word = re.sub(r"[\d.]+$", "", first_word)  # python3.12 -> python
+        second = parts[1].split(":")[0] if len(parts) > 1 else ""
+        runner = 2 if (first_word, second) in COMMAND_RUNNER_PAIRS else 1 if first_word in COMMAND_RUNNERS else 0
+        if runner:  # "env:*" or "npm exec *" is broad; "uv run pytest *" names what runs
+            rest = re.split(r"[\s:]+", args, maxsplit=runner)
+            if not (rest[runner] if len(rest) > runner else "").replace("*", "").replace(":", "").strip():
+                return "runs any command it is given"
         if first_word in HIGH_IMPACT_COMMANDS:
-            parts = args.split()
             # An interpreter pinned to one script file is narrow; the interpreter alone is not.
             if first_word in INTERPRETERS and len(parts) > 1 \
                     and re.match(r"[^\s*]+\.(?:py|sh|js|mjs|cjs|ts|rb|pl)(?::\*)?$", parts[1]):
@@ -867,6 +894,13 @@ def classify_allow_rule(rule):
 FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
 
 
+def yaml_scalar(s):
+    """A plain or quoted YAML scalar without its trailing "# comment"."""
+    s = s.strip()
+    q = re.match(r"""(['"])(.*?)\1""", s)
+    return q.group(2) if q else re.split(r"\s#", s, maxsplit=1)[0].strip()
+
+
 def frontmatter_value(text, key):
     """Value of a top-level key in a Markdown file's YAML frontmatter (str, list, or None)."""
     fm = FRONTMATTER_RE.match(text or "")
@@ -877,18 +911,25 @@ def frontmatter_value(text, key):
         km = re.match(r"^%s\s*:\s*(.*)$" % re.escape(key), line)
         if not km:
             continue
-        val = km.group(1).split(" #", 1)[0].strip()
-        if val.startswith("[") and val.endswith("]"):
-            return val[1:-1]
+        val = km.group(1).strip()
+        if val.startswith("["):  # flow list, possibly spread over several lines
+            flow = [val]
+            for l in lines[i + 1:]:
+                if "]" in flow[-1]:
+                    break
+                flow.append(l)
+            joined = " ".join(re.split(r"\s#", l, maxsplit=1)[0] for l in flow).strip()
+            return joined[1:joined.rfind("]")] if "]" in joined else joined[1:]
+        val = yaml_scalar(val)
         if val and val[0] not in "|>":
-            return val.strip("'\"")
+            return val
         items, block = [], []
         for l in lines[i + 1:]:
             if l.strip() and not l.startswith((" ", "\t", "-")):
                 break
             im = re.match(r"^\s*-\s+(.+)$", l)
             if im:
-                items.append(im.group(1).strip().strip("'\""))
+                items.append(yaml_scalar(im.group(1)))
             elif l.strip():
                 block.append(l.strip())
         return items if items else " ".join(block)
@@ -914,6 +955,23 @@ def split_tools(value):
     if buf:
         out.append(buf.strip("'\""))
     return out
+
+
+DOCKER_VAR_RE = re.compile(r"\$\{(\w+)(?:(:?[-+])([^}]*))?\}|\$(\w+)")
+
+
+def expand_build_args(ref, args):
+    """Expand $VAR, ${VAR}, ${VAR:-word} and ${VAR:+word} in a FROM image with the
+    ARG defaults declared before the first FROM. Unknown values stay as written."""
+    def sub(v):
+        name, op, word = v.group(1) or v.group(4), v.group(2), v.group(3)
+        val = args.get(name)
+        if op and op.endswith("-"):
+            return val or word
+        if op:  # ${VAR:+word} depends on whether VAR is set at build time
+            return word if val else v.group(0)
+        return val or v.group(0)
+    return DOCKER_VAR_RE.sub(sub, ref)
 
 
 def parse_github_slug(url):
@@ -1581,8 +1639,11 @@ class Collector:
             self.r["history_scan"] = {"performed": False}
             return
         hist_rules = [r for r in SECRET_RULES_C if r[0] in HISTORY_RULE_IDS]
-        cmd = ["git", "-C", self.root, "log", "--all", "-p", "--no-color", "-U0", "--no-ext-diff",
-               "-n", str(n_commits), "--format=__COMMIT__ %H %cI"]
+        # Two lines of context let an unchanged PEM header start a key whose body was
+        # replaced in place (key rotation; the first body line of an OpenSSH key is the
+        # same for every key). --no-textconv: never run diff drivers.
+        cmd = ["git", "-c", "core.quotepath=off", "-C", self.root, "log", "--all", "-p", "--no-color", "-U2",
+               "--no-ext-diff", "--no-textconv", "-n", str(n_commits), "--format=__COMMIT__ %H %cI"]
         found, seen = [], set()
         start = time.time()
         lines_read = 0
@@ -1592,43 +1653,88 @@ class Collector:
         except OSError:
             self.r["history_scan"] = {"performed": False, "error": "git not available"}
             return
-        commit, date, path = None, None, None
-        pem_header = None  # a PEM header line whose body is expected on the next added line
+        commit, date, path, in_file_header = None, None, None, False
+        pem = None  # PEM block being read: [header, body lines, whether any body line was added]
 
-        def record(rid, value, masked, h):
+        def record(rid, masked, h):
             if (rid, h) in seen:
                 return
             seen.add((rid, h))
-            found.append({"rule": rid, "commit": commit, "date": date, "file": path, "value": masked,
-                          "still_in_working_tree": h in self._secret_hashes})
+            f = {"rule": rid, "commit": commit, "date": date, "file": path, "value": masked,
+                 "still_in_working_tree": h in self._secret_hashes, "test_path": is_test_path(path)}
+            if self.prefix:  # git reports paths from the repository root
+                if path.startswith(self.prefix):
+                    f["file"] = path[len(self.prefix):]
+                else:  # the current files there were not scanned, so presence is unknown
+                    f["file"], f["still_in_working_tree"] = REPO_ROOT_MARK + path, None
+            found.append(f)
+
+        def end_pem():
+            if pem and pem[2] and len("".join(pem[1])) >= 40:
+                record("private-key", pem[0][:40], secret_fingerprint("private-key", pem[0] + "".join(pem[1])))
 
         for line in proc.stdout:
             lines_read += 1
             if lines_read > 3_000_000 or time.time() - start > 90:
                 truncated = True
                 break
-            header, pem_header = pem_header, None
-            if line.startswith("__COMMIT__ "):
-                parts = line.split()
-                commit, date = parts[1][:12], (parts[2] if len(parts) > 2 else None)
-            elif line.startswith("+++ "):
-                path = line[6:].strip() if line.startswith("+++ b/") else None
-            elif line.startswith("+") and path:
-                added = line[1:]
-                if header and PEM_BODY_RE.fullmatch(added.rstrip("\r\n")):
-                    record("private-key", header, header[:40], secret_fingerprint("private-key", header, added))
-                hm = PEM_HEADER_RE.search(added)
-                if hm and not added[hm.end():].strip():
-                    pem_header = hm.group(0)
+            if line.startswith(("__COMMIT__ ", "diff --git ", "@@")):
+                end_pem()
+                pem = None
+                if line.startswith("__COMMIT__ "):
+                    parts = line.split()
+                    commit, date = parts[1][:12], (parts[2] if len(parts) > 2 else None)
+                    in_file_header = False
+                else:
+                    in_file_header = line.startswith("diff --git ")
+                    if in_file_header:
+                        path = None
+                continue
+            if in_file_header:
+                if line.startswith("+++ "):
+                    p = line[4:].rstrip("\r\n")
+                    if p.startswith('"') and p.endswith('"'):
+                        p = p[1:-1]
+                    path = p[2:] if p.startswith("b/") else None
+                continue
+            tag, content = line[:1], line[1:].rstrip("\r\n")
+            if not path or tag not in ("+", " "):
+                continue  # removed lines neither start nor end a PEM block
+            s = content.strip()
+            hm = PEM_HEADER_RE.search(content)
+            if hm and not content[hm.end():].strip():
+                end_pem()
+                pem = [hm.group(0), [], False]
+            elif pem is not None:
+                if PEM_B64_LINE_RE.fullmatch(s):
+                    pem[1].append(s)
+                    pem[2] = pem[2] or tag == "+"
+                elif s and not PEM_ARMOR_HEADER_RE.match(s):  # the END line, or not a key after all
+                    end_pem()
+                    pem = None
+            if tag == "+":
                 for rid, desc, rx, conf, group in hist_rules:
-                    for m in rx.finditer(added):
+                    for m in rx.finditer(content):
                         value = m.group(group) if group else m.group(0)
-                        record(rid, value, mask(value) if group else value[:40],
-                               secret_fingerprint(rid, value, added, m.end()))
+                        record(rid, mask(value) if group else value[:40],
+                               secret_fingerprint(rid, value, content, m.end()))
+        if not truncated:
+            end_pem()
+        proc.stdout.close()
         proc.kill()
         proc.wait()
+        counts = Counter(f["rule"] for f in found)
+        # Removed-from-tree findings first and test/example paths last, then cap each rule
+        # separately so that a pile of test keys cannot push other leaks out of the list.
+        rank = {False: 0, None: 1, True: 2}
+        found.sort(key=lambda f: (rank[f["still_in_working_tree"]], f["test_path"]))
+        shown, taken = [], Counter()
+        for f in found:
+            taken[f["rule"]] += 1
+            if taken[f["rule"]] <= self.max_hits:
+                shown.append(f)
         self.r["history_scan"] = {"performed": True, "commits_requested": n_commits, "truncated": truncated,
-                                  "findings": found[: self.max_hits * 2]}
+                                  "findings": shown, "counts_by_rule": dict(counts)}
 
     # -- containers & infrastructure ------------------------------------------
     def containers(self):
@@ -1647,19 +1753,22 @@ class Collector:
                 m = re.match(r"(?i)^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?", s)
                 if m:
                     seen_from = True
-                    img = re.sub(r"\$\{?(\w+)\}?", lambda v: global_args.get(v.group(1), v.group(0)), m.group(1))
+                    img = expand_build_args(m.group(1), global_args)
                     if m.group(2):
                         stages.add(m.group(2).lower())
                     final_user = None
                     if img.lower() in stages or img == "scratch":
                         continue
-                    if "$" in img:  # set by a build argument without a default
-                        images.append({"image": img, "digest_pinned": False, "tag": None,
-                                       "latest_or_untagged": False, "build_arg": True})
-                        continue
-                    tag = img.split("@")[0].rsplit(":", 1)[1] if ":" in img.split("@")[0].split("/")[-1] else None
-                    images.append({"image": img, "digest_pinned": "@sha256:" in img,
-                                   "tag": tag, "latest_or_untagged": ("@sha256:" not in img) and tag in (None, "latest")})
+                    # A variable left in the tag (or in an untagged last component) is set at
+                    # build time; one in the registry prefix does not affect the pin.
+                    last = re.sub(r"\$\{[^}]*\}|\$\w+", "\0", img.split("@")[0].split("/")[-1])
+                    tag = last.rsplit(":", 1)[1] if ":" in last else None
+                    digest = "@sha256:" in img
+                    build_arg = not digest and "\0" in (last if tag is None else tag)
+                    images.append({"image": img, "digest_pinned": digest, "tag": None if build_arg else tag,
+                                   "latest_or_untagged": not digest and not build_arg and tag in (None, "latest")})
+                    if build_arg:
+                        images[-1]["build_arg"] = True
                     continue
                 m = re.match(r"(?i)^USER\s+(\S+)", s)
                 if m:
@@ -1762,13 +1871,16 @@ class Collector:
             perms = as_dict(data.get("permissions"))
             allow = [str(x) for x in as_list(perms.get("allow"))]
             deny = [str(x) for x in as_list(perms.get("deny"))]
-            rep["allow"] = allow[:40]
-            rep["deny"] = deny[:40]
-            rep["ask"] = [str(x) for x in as_list(perms.get("ask"))][:20]
+            # Rules are printed through mask_secrets_in: they can embed tokens, e.g.
+            # Bash(curl -H "Authorization: token ghp_...").
+            rep["allow"] = [mask_secrets_in(x) for x in allow[:40]]
+            rep["deny"] = [mask_secrets_in(x) for x in deny[:40]]
+            rep["ask"] = [mask_secrets_in(str(x)) for x in as_list(perms.get("ask"))][:20]
             rep["default_mode"] = perms.get("defaultMode") or data.get("defaultMode")
             rep["disable_bypass_permissions_mode"] = perms.get("disableBypassPermissionsMode")
             rep["additional_directories"] = perms.get("additionalDirectories")
-            rep["broad_allow_rules"] = ["%s  <- %s" % (rule, why) for rule in allow for why in [classify_allow_rule(rule)] if why]
+            rep["broad_allow_rules"] = ["%s  <- %s" % (mask_secrets_in(rule), why)
+                                        for rule in allow for why in [classify_allow_rule(rule)] if why]
             rep["denies_secret_reads"] = any(re.search(r"\.env|secret|\.pem|\.key|id_rsa|credentials|\.ssh", d, re.I) for d in deny)
             rep["enable_all_project_mcp_servers"] = data.get("enableAllProjectMcpServers")
             rep["enabled_mcpjson_servers"] = data.get("enabledMcpjsonServers")
@@ -1800,8 +1912,9 @@ class Collector:
                     continue
                 tools = split_tools(frontmatter_value(text, "allowed-tools"))
                 if tools:
-                    grants.append({"path": self.disp(f), "allowed_tools": tools[:20],
-                                   "broad": ["%s  <- %s" % (t, why) for t in tools for why in [classify_allow_rule(t)] if why]})
+                    grants.append({"path": self.disp(f), "allowed_tools": [mask_secrets_in(t) for t in tools[:20]],
+                                   "broad": ["%s  <- %s" % (mask_secrets_in(t), why)
+                                             for t in tools for why in [classify_allow_rule(t)] if why]})
         out["project_skill_grants"] = grants[:30]
 
         mcp = []
@@ -2080,11 +2193,19 @@ def render_md(r):
     w("- env example files: %s" % (", ".join(sf["env_example_files"]) or "none"))
     hs = r["history_scan"]
     if hs.get("performed"):
-        w("- git history scan (last %d commits, high-confidence rules%s): %s" % (
+        counts = hs.get("counts_by_rule") or {}
+        total = sum(counts.values())
+        w("- git history scan (last %d commits, all refs, high-confidence rules%s): %s" % (
             hs["commits_requested"], ", truncated" if hs["truncated"] else "",
-            "; ".join("%s in %s @%s (%s)%s" % (f["rule"], f["file"], f["commit"], f["value"],
-                                               " still present" if f["still_in_working_tree"] else " removed from tree but in history")
-                      for f in hs["findings"]) or "no findings"))
+            ("%d distinct secret(s) (%s)%s" % (total, ", ".join("%s=%d" % kv for kv in sorted(counts.items())),
+                                               "; showing %d, removed-from-tree first" % len(hs["findings"])
+                                               if total > len(hs["findings"]) else "")) if total else "no findings"))
+        status = {True: "still present", False: "**removed from tree but in history**",
+                  None: "outside the scanned directory (presence not checked)"}
+        for f in hs["findings"]:
+            w("  - %s in `%s` @%s (%s) — %s%s" % (f["rule"], f["file"], f["commit"], f["value"],
+                                                status[f["still_in_working_tree"]],
+                                                " (test/example path)" if f.get("test_path") else ""))
     else:
         w("- git history scan: not performed (re-run with --scan-history N)")
     w("")
