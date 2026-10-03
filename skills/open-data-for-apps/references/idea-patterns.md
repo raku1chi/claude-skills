@@ -8,7 +8,7 @@
 |---|---|---|
 | 住所 → 緯度経度 | 住所しかないデータを地図に載せる、近い順に並べる | アドレス・ベース・レジストリ、ABRジオコーダー、normalize-japanese-addresses、位置参照情報（maps-addresses.md） |
 | 郵便番号 → 住所 | 住所の入力を省く | 郵便番号データ、郵便番号・デジタルアドレスAPI（maps-addresses.md） |
-| 緯度経度 → 市区町村・小地域・メッシュ | 地点に統計やハザードを重ねる | 国土数値情報の行政区域（maps-addresses.md）、統計GIS の小地域・メッシュ（statistics.md）、J-SHIS の 250m メッシュ（weather-disaster.md） |
+| 緯度経度 → 市区町村・小地域・メッシュ | 地点に統計やハザードを重ねる、地図を塗り分ける | 市区町村の境界は国土数値情報の行政区域（maps-addresses.md）、町丁・字などの小地域とメッシュは統計GIS（statistics.md）、地震の揺れは J-SHIS の 250m メッシュ（weather-disaster.md） |
 | 地方公共団体コード | 市区町村ごとの統計・施設・観光のデータどうし | 全国地方公共団体コード（life-education-local.md）と、e-Stat・統計ダッシュボードAPI・SSDSE などの市区町村別の統計（statistics.md） |
 | 法人番号 | 企業の登記・補助金・開示書類・職場情報。法人番号の全件データには本店所在地の都道府県コード・市区町村コードもあるので、市区町村の統計にもつながる | 法人番号、gBizINFO、EDINET、インボイス（法人の登録番号は「T＋法人番号」）、女性活躍DB（business-finance-jobs.md）、介護事業所のデータ（health-welfare-food.md） |
 | 学校コード | 学校の情報 | 学校コード（life-education-local.md） |
