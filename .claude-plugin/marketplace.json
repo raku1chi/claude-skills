@@ -12,6 +12,13 @@
       "source": "./",
       "strict": false,
       "skills": ["./skills/security-posture-check"]
+    },
+    {
+      "name": "open-data-for-apps",
+      "description": "アプリのアイデア出しと、作りたいアプリに使えるデータ探しを手伝う。日本の公的機関を中心に海外も含むオープンデータ・公開 API 約 190 件の調査（2026 年 10 月時点）をもとに、登録の要否・商用利用の可否と、提供終了やライセンス・法令の注意点まで示す",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/open-data-for-apps"]
     }
   ]
 }

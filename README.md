@@ -7,6 +7,7 @@
 | スキル | できること |
 |---|---|
 | [security-posture-check](skills/security-posture-check/) | リポジトリのセキュリティ対策を OWASP ASVS 5.0・OWASP Top 10:2025・NIST SSDF などの基準に照らして証拠ベースで診断し、「できていること／できていないこと」と優先度付きの対応方針を出す。結果は Markdown レポートか GitHub Issues にできる |
+| [open-data-for-apps](skills/open-data-for-apps/) | アプリのアイデア出しと、作りたいアプリに使えるデータ探しを手伝う。日本の公的機関を中心に海外も含むオープンデータ・公開 API 約 190 件の調査（2026 年 10 月時点）をもとに、登録の要否・商用利用の可否と、提供終了やライセンス・法令の注意点まで示す |
 
 ## インストール
 
@@ -17,7 +18,10 @@
 ```
 /plugin marketplace add raku1chi/claude-skills
 /plugin install security-posture-check@raku1chi-skills
+/plugin install open-data-for-apps@raku1chi-skills
 ```
+
+スキルごとに別のプラグインになっているので、使うものだけを入れればよい。この節の以降の例は security-posture-check なので、ほかのスキルは名前を置き換える。
 
 `/plugin install` を実行するとプラグインの詳細が開くので、使う範囲（スコープ）を選んでインストールする。
 
@@ -76,7 +80,9 @@ cp -r ~/src/claude-skills/skills/security-posture-check .claude/skills/
 
 ## 使い方
 
-Claude Code で次のように頼むと、スキルが使われる（`/security-posture-check` で明示的に呼び出してもよい。プラグインとして入れた場合の正式な名前は `/security-posture-check:security-posture-check`）。
+Claude Code で次のように頼むと、スキルが使われる（`/security-posture-check` のようにスキル名で明示的に呼び出してもよい。プラグインとして入れた場合の正式な名前は `/security-posture-check:security-posture-check` の形）。
+
+### security-posture-check
 
 - 「このリポジトリのセキュリティ診断をして、対応方針を出して」
 - 「公開前にセキュリティで足りないところを洗い出して。結果は security-reports/ に保存して」
@@ -84,11 +90,26 @@ Claude Code で次のように頼むと、スキルが使われる（`/security-
 
 診断結果をチャットで示したあと、出力先（ローカルの Markdown レポート / GitHub Issues / 両方）を確認してから書き出す。Issue を作る前には、作成予定の一覧を見せて了承を取る。
 
-### 必要なもの
+#### 必要なもの
 
 - Python 3.8 以上（事実収集スクリプト用。標準ライブラリのみ。無い場合は Claude が手作業で同じ観点を確認する）
 - Issue を作る場合: 認証済みの `gh` CLI、または GitHub の MCP ツール（どちらもなければ Issue の下書きをファイルに書き出す）
 - 任意: gitleaks、semgrep、trivy などのセキュリティツール（入っていれば使う。インストールはしない）
+
+### open-data-for-apps
+
+- 「オープンデータを使った防災アプリのアイデアを 5 つ出して。商用で出したい」
+- 「近くの開いている小児科を探すアプリを作りたい。使えるデータは？」
+- 「e-Stat と何を組み合わせると面白いアプリになる？」
+- 「OpenStreetMap のデータは商用のアプリで使える？何を表示すればいい？」
+
+アイデア出しでは、案ごとに使うデータとそのつなぎ方を、データ探しでは機能ごとの本命と代わりの候補を、登録の要否・商用利用の可否・注意点つきで返す。気になる案を選ぶと、データの取り方や申請の段取りまで具体化する。
+
+カタログは調査時点（2026 年 10 月）の情報。Web を見られる環境では、調査時点から 3 か月以上たったとき、商用で使うのに条件が「要確認」のデータがあるとき、頼まれたときに、本命のデータの公式ページで提供状況と規約を確かめる。本番で使う前には、自分でも公式ページの規約を確かめること。カタログを新しくする手順は [references/sources.md](skills/open-data-for-apps/references/sources.md) にある。
+
+#### 必要なもの
+
+- 特になし（Web の検索・取得ができると、調査時点より新しい情報を確かめられる）
 
 ## ディレクトリ構成
 
