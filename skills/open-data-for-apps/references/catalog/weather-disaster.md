@@ -12,7 +12,7 @@
 | [最新の気象データCSV](https://www.data.jma.go.jp/stats/data/mdrr/docs/csv_dl_readme.html)（気象庁） | 全国の最新の降水量・気温・風速・積雪（10分〜毎時更新） | CSV | 不要 | 可（出典） | 今日の最高気温ランキング |
 | [気象庁HPの内部JSON](https://www.jma.go.jp/bosai/forecast/data/forecast/130000.json)（気象庁HP） | 天気予報、アメダス、警報など | JSON | 不要 | 非公式（仕様の保証なし） | 個人用の天気ウィジェット |
 | [ハザードマップポータル オープンデータ](https://disaportal.gsi.go.jp/hazardmapportal/hazardmap/copyright/opendata.html)（国土交通省・国土地理院） | 洪水浸水想定、家屋倒壊、内水、高潮、津波、土砂災害警戒区域など | 地図タイル（PNG） | 不要 | 可（URLから直接読み込む場合。一部レイヤーは別条件） | 物件検索に浸水深を重ねる |
-| [指定緊急避難場所データ](https://www.gsi.go.jp/bosaichiri/hinanbasho.html)（国土地理院・市町村） | 避難場所の位置と、災害種別ごとの対応可否 | CSV | 不要 | 要確認 | 災害の種類で絞る避難場所ナビ |
+| [指定緊急避難場所データ](https://www.gsi.go.jp/bousaichiri/hinanbasho.html)（国土地理院・市町村） | 避難場所の位置と、災害種別ごとの対応可否 | CSV | 不要 | 要確認 | 災害の種類で絞る避難場所ナビ |
 | [J-SHIS Web API](https://www.j-shis.bosai.go.jp/api-list)（防災科学技術研究所） | 250mメッシュの地震ハザード（30年超過確率など）、表層地盤 | API（JSON/GeoJSON） | 不要 | 条件付き（販売は要問い合わせ） | 住所から地震の発生確率を表示 |
 | [P2P地震情報 API](https://www.p2pquake.net/)（P2PQuake開発チーム） | 気象庁の地震・津波情報の再配信 | API（JSON） | 不要 | 可（非公式のコミュニティ運営） | チャットの地震通知Bot |
 | [水文水質データベース](https://www1.river.go.jp/cgi-bin/SrchSite.exe)（国土交通省） | 約8,700観測所の雨量・水位・水質などの過去データ | Web検索 | 要確認 | 要確認 | 河川水位の長期傾向の分析 |
